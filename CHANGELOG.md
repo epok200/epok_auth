@@ -16,8 +16,11 @@ First production-candidate beta for the Colors integration:
 - FastAPI routers, dependencies and administrative endpoints;
 - operational CLI and Nuxt BFF reference;
 - reproducible `uv.lock` and isolated package installation;
+- single-source versioning through `pyproject.toml`, `uv version` and `importlib.metadata`;
+- guarded local publication through `uv build --no-sources` and `uv publish`;
+- ignored local PyPI credentials with repository safeguards;
 - CodeQL, dependency audit, strict typing and Ruff security rules;
-- 101 passing tests with 94.80% branch-aware coverage;
+- 102 passing tests with branch-aware coverage above 90%;
 - Python 3.12, 3.13 and 3.14 validation;
 - PostgreSQL 17 integration and concurrency validation.
 
