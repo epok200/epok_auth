@@ -154,6 +154,7 @@ def test_production_fails_closed() -> None:
         {"cookie_use_host_prefix": False},
         {"require_origin": False},
         {"trusted_origins": ()},
+        {"trusted_origins": ("http://localhost:3000",)},
         {"password_min_length": 12},
     ):
         values = dict(base)
