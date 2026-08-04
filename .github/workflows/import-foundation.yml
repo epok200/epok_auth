@@ -38,15 +38,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -d .bootstrap/chunks2 ]; then
+          if [ ! -d .bootstrap ]; then
             echo "Validated tree already imported."
             exit 0
           fi
-          test "$(find .bootstrap/chunks2 -maxdepth 1 -name 'part*' | wc -l)" -eq 35
-          cat .bootstrap/chunks2/part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
+
+          test -f .bootstrap/archive.part000
+          test -f .bootstrap/archive.part001
+          test "$(find .bootstrap -maxdepth 1 -name 'archive.part*' | wc -l)" -eq 2
+
+          cat .bootstrap/archive.part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
           echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
-          tar -tzf /tmp/epok-auth.tar.gz | grep -Ev '(^|/)\.git(/|$)|^\.github/' > /tmp/archive-files.txt
+
+          tar -tzf /tmp/epok-auth.tar.gz > /tmp/archive-files.txt
           test -s /tmp/archive-files.txt
+          if grep -Eq '(^|/)\.git(/|$)|^\.github/' /tmp/archive-files.txt; then
+            echo "Archive contains forbidden repository metadata or workflows."
+            exit 1
+          fi
+
           tar -xzf /tmp/epok-auth.tar.gz -C .
           rm -rf .bootstrap
 
