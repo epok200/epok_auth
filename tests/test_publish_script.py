@@ -15,9 +15,7 @@ SPEC.loader.exec_module(publish)
 
 
 def test_parse_secret_text_accepts_comments_and_quotes() -> None:
-    token = publish.parse_secret_text(
-        '# local token\nUV_PUBLISH_TOKEN="pypi-example_token-123"\n'
-    )
+    token = publish.parse_secret_text('# local token\nUV_PUBLISH_TOKEN="pypi-example_token-123"\n')
     assert token == "pypi-example_token-123"
 
 
@@ -28,9 +26,7 @@ def test_parse_secret_text_rejects_unknown_keys() -> None:
 
 def test_parse_secret_text_rejects_duplicates() -> None:
     with pytest.raises(publish.ReleaseError, match="only once"):
-        publish.parse_secret_text(
-            "UV_PUBLISH_TOKEN=pypi-first\nUV_PUBLISH_TOKEN=pypi-second\n"
-        )
+        publish.parse_secret_text("UV_PUBLISH_TOKEN=pypi-first\nUV_PUBLISH_TOKEN=pypi-second\n")
 
 
 @pytest.mark.parametrize(
