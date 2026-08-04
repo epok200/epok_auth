@@ -46,7 +46,7 @@ jobs:
           test -f /tmp/epok-auth-clean/pyproject.toml
           test -f /tmp/epok-auth-clean/src/epok_auth/__init__.py
           test -f /tmp/epok-auth-clean/.github/workflows/ci.yml
-          if find /tmp/epok-auth-clean -path '*/.git*' -print -quit | grep -q .; then
+          if find /tmp/epok-auth-clean -name .git -print -quit | grep -q .; then
             echo "Archive contains forbidden Git metadata."
             exit 1
           fi
