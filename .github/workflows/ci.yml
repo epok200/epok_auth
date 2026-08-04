@@ -16,15 +16,6 @@ concurrency:
 
 env:
   PYTHONUNBUFFERED: "1"
-  TEST_DATABASE_URL: postgresql+psycopg://epok_auth:epok_auth@127.0.0.1:5432/epok_auth_test
-  EPOK_AUTH_ENVIRONMENT: test
-  EPOK_AUTH_DATABASE_URL: postgresql+psycopg://epok_auth:epok_auth@127.0.0.1:5432/epok_auth_test
-  EPOK_AUTH_JWT_SECRET: ci-only-epok-auth-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
-  EPOK_AUTH_ISSUER: epok-auth-ci
-  EPOK_AUTH_AUDIENCE: epok-auth-ci-api
-  EPOK_AUTH_SECURE_COOKIES: "false"
-  EPOK_AUTH_COOKIE_USE_HOST_PREFIX: "false"
-  EPOK_AUTH_TRUSTED_ORIGINS: http://localhost:3000
 
 jobs:
   quality:
@@ -78,6 +69,8 @@ jobs:
     name: postgres-17
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://epok_auth:epok_auth@127.0.0.1:5432/epok_auth_test
     services:
       postgres:
         image: postgres:17-alpine
@@ -100,9 +93,21 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --locked --all-extras --group dev --python 3.12
       - name: Migrate from an empty database
-        run: uv run epok-auth upgrade-db
+        run: |
+          uv run python - <<'PY'
+          import os
+          from epok_auth.migrate import upgrade_database
+
+          upgrade_database(os.environ["TEST_DATABASE_URL"])
+          PY
       - name: Assert metadata has no migration drift
-        run: uv run epok-auth check-db
+        run: |
+          uv run python - <<'PY'
+          import os
+          from epok_auth.migrate import check_database
+
+          check_database(os.environ["TEST_DATABASE_URL"])
+          PY
       - name: PostgreSQL integration and concurrency suite
         run: uv run pytest -m integration -q
 
@@ -110,6 +115,8 @@ jobs:
     name: coverage
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://epok_auth:epok_auth@127.0.0.1:5432/epok_auth_test
     services:
       postgres:
         image: postgres:17-alpine
@@ -131,7 +138,14 @@ jobs:
           enable-cache: true
       - run: uv python install 3.12
       - run: uv sync --locked --all-extras --group dev --python 3.12
-      - run: uv run epok-auth upgrade-db
+      - name: Migrate from an empty database
+        run: |
+          uv run python - <<'PY'
+          import os
+          from epok_auth.migrate import upgrade_database
+
+          upgrade_database(os.environ["TEST_DATABASE_URL"])
+          PY
       - name: Enforce branch coverage across unit and PostgreSQL paths
         run: >-
           uv run pytest
