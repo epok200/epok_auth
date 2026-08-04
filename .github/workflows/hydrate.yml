@@ -1,0 +1,67 @@
+name: Hydrate validated foundation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: epok-auth-foundation-hydration
+  cancel-in-progress: false
+
+jobs:
+  hydrate:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/auth-foundation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout trusted head branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: codex/auth-foundation
+          fetch-depth: 0
+
+      - name: Decode, verify and import foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d .bootstrap ]; then
+            echo "Foundation already hydrated."
+            exit 0
+          fi
+
+          test -f .bootstrap/archive.part000
+          test -f .bootstrap/archive.part001
+          test "$(find .bootstrap -maxdepth 1 -name 'archive.part*' | wc -l)" -eq 2
+
+          : > /tmp/epok-auth.tar.gz
+          for part in .bootstrap/archive.part*; do
+            tr -d '[:space:]' < "$part" | base64 --decode >> /tmp/epok-auth.tar.gz
+          done
+
+          echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
+          tar -tzf /tmp/epok-auth.tar.gz > /tmp/archive-files.txt
+          test -s /tmp/archive-files.txt
+          if grep -Eq '(^|/)\.git(/|$)' /tmp/archive-files.txt; then
+            echo "Archive contains forbidden Git metadata."
+            exit 1
+          fi
+
+          tar -xzf /tmp/epok-auth.tar.gz --exclude='.github' -C .
+          rm -rf .bootstrap
+
+          git config user.name "epok-auth foundation importer"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No hydration changes were produced."
+            exit 0
+          fi
+          git commit -m "feat: hydrate validated authentication foundation"
+          git push origin HEAD:codex/auth-foundation
