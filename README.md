@@ -5,6 +5,8 @@
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
 > **Status:** `0.1.0b1` beta candidate. The standalone library gate is green. Colors integration and application-level parity remain required before using this beta in that product. Public APIs may still change before `1.0`.
+>
+> **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
 ## Validated beta gate
 
