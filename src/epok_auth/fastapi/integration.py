@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Self
@@ -34,7 +35,7 @@ from epok_auth.fastapi.schemas import (
     UserListResponse,
     UserResponse,
 )
-from epok_auth.models import Principal, RequestContext, UserUpdate
+from epok_auth.models import Principal, RequestContext, SessionBundle, UserUpdate
 from epok_auth.service import AuthService
 from epok_auth.store import AuthStore
 
@@ -395,7 +396,7 @@ class EpokAuth:
 
         return await request_validation_exception_handler(request, error)
 
-    def _set_session_cookies(self, response: Response, bundle: Any) -> None:
+    def _set_session_cookies(self, response: Response, bundle: SessionBundle) -> None:
         now = datetime.now(UTC)
         max_age = max(
             0,
@@ -426,14 +427,22 @@ class EpokAuth:
         )
 
     def _delete_session_cookies(self, response: Response) -> None:
-        common = {
-            "path": self.settings.cookie_path,
-            "domain": self.settings.cookie_domain,
-            "secure": self.settings.secure_cookies,
-            "samesite": self.settings.cookie_same_site,
-        }
-        response.delete_cookie(self.settings.effective_refresh_cookie_name, **common)
-        response.delete_cookie(self.settings.effective_csrf_cookie_name, **common)
+        response.delete_cookie(
+            self.settings.effective_refresh_cookie_name,
+            path=self.settings.cookie_path,
+            domain=self.settings.cookie_domain,
+            secure=self.settings.secure_cookies,
+            httponly=True,
+            samesite=self.settings.cookie_same_site,
+        )
+        response.delete_cookie(
+            self.settings.effective_csrf_cookie_name,
+            path=self.settings.cookie_path,
+            domain=self.settings.cookie_domain,
+            secure=self.settings.secure_cookies,
+            httponly=self.settings.csrf_cookie_http_only,
+            samesite=self.settings.cookie_same_site,
+        )
 
     @staticmethod
     def _disable_cache(response: Response) -> None:

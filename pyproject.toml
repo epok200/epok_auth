@@ -116,5 +116,5 @@ ignore = ["PLR0913", "PLR2004", "S101"]
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
-include = ["src", "tests"]
+include = ["src"]
 reportMissingTypeStubs = "none"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -46,7 +46,7 @@ class PostgresAuthStore:
         return cls(engine)
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[AuthTransaction]:
+    async def transaction(self) -> AsyncGenerator[AuthTransaction, None]:
         async with self.engine.begin() as connection:
             yield PostgresAuthTransaction(connection)
 

@@ -54,13 +54,16 @@ class HMACJWTSigner:
             "iss": self.issuer,
             "aud": self.audience,
         }
-        return jwt.encode(payload, self.secret, algorithm=self.algorithm), expires_at
+        token = jwt.encode(  # pyright: ignore[reportUnknownMemberType]
+            payload, self.secret, algorithm=self.algorithm
+        )
+        return token, expires_at
 
     def verify(self, token: str) -> AccessClaims:
         if not token or len(token) > self.max_token_chars:
             raise invalid_session()
         try:
-            payload = jwt.decode(
+            payload = jwt.decode(  # pyright: ignore[reportUnknownMemberType]
                 token,
                 self.secret,
                 algorithms=[self.algorithm],

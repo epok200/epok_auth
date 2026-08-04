@@ -5,6 +5,12 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
+SecurityMetadata = dict[str, str | int | bool | None]
+
+
+def _empty_security_metadata() -> SecurityMetadata:
+    return {}
+
 
 class UserStatus(StrEnum):
     ACTIVE = "active"
@@ -113,7 +119,7 @@ class SecurityEvent:
     request_id: str | None = None
     ip_address: str | None = None
     user_agent: str | None = None
-    metadata: dict[str, str | int | bool | None] = field(default_factory=dict)
+    metadata: SecurityMetadata = field(default_factory=_empty_security_metadata)
 
 
 @dataclass(frozen=True, slots=True)

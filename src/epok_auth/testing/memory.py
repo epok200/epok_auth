@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -22,7 +22,7 @@ class MemoryAuthStore:
         self._lock = asyncio.Lock()
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[AuthTransaction]:
+    async def transaction(self) -> AsyncGenerator[AuthTransaction, None]:
         async with self._lock:
             snapshot = copy.deepcopy((self.users, self.sessions, self.events))
             try:
