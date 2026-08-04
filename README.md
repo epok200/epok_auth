@@ -4,7 +4,24 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-> **Status:** `0.1.0b1`. The beta is intended to become the first production candidate for Colors after its CI gate and application parity tests pass. APIs may still change before `1.0`.
+> **Status:** `0.1.0b1` beta candidate. The standalone library gate is green. Colors integration and application-level parity remain required before using this beta in that product. Public APIs may still change before `1.0`.
+
+## Validated beta gate
+
+The clean beta tree is continuously validated by GitHub Actions. The current candidate has passed:
+
+| Gate | Evidence |
+|---|---|
+| Functional and adversarial tests | 101/101 passing |
+| Branch coverage | 94.80% |
+| Python compatibility | 3.12, 3.13 and 3.14 |
+| PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
+| Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |
+| Dependencies | Reproducible `uv.lock` and `pip-audit` |
+| Distribution | Wheel and sdist build, packaged migrations, `py.typed`, isolated install and CLI smoke test |
+| Code scanning | CodeQL `security-extended` |
+
+The repository does not claim that vulnerabilities are impossible. The green gate establishes reproducible evidence for the defined beta threat model and invariants.
 
 ## What the beta includes
 
@@ -24,6 +41,8 @@
 Google OIDC, TOTP/MFA, passkeys, Redis coordination, multi-tenancy and service-to-service authentication remain outside this beta. See [ROADMAP.md](ROADMAP.md).
 
 ## Installation
+
+Until the beta is published to PyPI, consume the reviewed commit or Git tag explicitly. After publication:
 
 ```bash
 uv add "epok-auth[postgres]"
@@ -51,6 +70,7 @@ Production configuration is **fail-closed**: weak secrets, insecure cookies, gen
 ```bash
 uv run epok-auth check-config
 uv run epok-auth upgrade-db
+uv run epok-auth check-db
 uv run epok-auth create-admin
 ```
 
@@ -153,11 +173,11 @@ Read [SECURITY.md](SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), a
 ## Development
 
 ```bash
-uv sync --all-extras --group dev
+uv sync --locked --all-extras --group dev
 uv run ruff format --check .
 uv run ruff check .
 uv run pyright
 uv run pytest
 ```
 
-Pull requests must pass the GitHub Actions `CI / merge-gate`, including PostgreSQL 17, Python 3.12–3.14, branch coverage, packaging and isolated installation.
+Pull requests must pass the GitHub Actions `CI / merge-gate`, including PostgreSQL 17, Python 3.12–3.14, branch coverage, dependency auditing, packaging and isolated installation. `CodeQL` must also pass.
