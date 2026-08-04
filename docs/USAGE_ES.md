@@ -6,7 +6,7 @@ La ruta recomendada para la primera prueba es usar `AuthSettings`, `EpokAuth.pos
 
 ## 1. Requisitos
 
-Necesitas Python 3.12 o superior, `uv`, Docker, `curl` y, opcionalmente, `jq` para extraer valores de las respuestas JSON.
+Necesitas Python 3.12 o superior, `uv`, Docker y `curl`. Los comandos del flujo automatizado usan también `jq`; puedes sustituirlo por lectura manual de las respuestas JSON.
 
 Desde la raíz del repositorio:
 
@@ -29,6 +29,12 @@ Si el contenedor ya existe:
 
 ```bash
 docker start epok-auth-postgres
+```
+
+Puedes confirmar que PostgreSQL ya acepta conexiones con:
+
+```bash
+docker exec epok-auth-postgres pg_isready -U epok_auth -d epok_auth
 ```
 
 ## 3. Configuración local mínima
@@ -352,7 +358,7 @@ print(settings.effective_csrf_cookie_name)
 Construye la integración utilizando un store proporcionado manualmente. Se usa principalmente para adaptadores personalizados o pruebas.
 
 ```python
-from epok_auth import EpokAuth
+from epok_auth import AuthSettings, EpokAuth
 from epok_auth.testing import MemoryAuthStore
 
 store = MemoryAuthStore()
@@ -429,6 +435,7 @@ Dependencia que valida el access token y entrega un `Principal`. Permite usuario
 from fastapi import Depends
 from epok_auth import Principal
 
+
 @app.get("/onboarding")
 async def onboarding(
     principal: Principal = Depends(auth.current_user),
@@ -483,9 +490,7 @@ Exige que el login original sea reciente. Un refresh no reinicia `authenticated_
 ```python
 @app.delete("/dangerous-operation")
 async def dangerous_operation(
-    principal: Principal = Depends(
-        auth.require_recent_authentication(max_age_seconds=300)
-    ),
+    principal: Principal = Depends(auth.require_recent_authentication(max_age_seconds=300)),
 ) -> dict[str, str]:
     return {"confirmed_by": principal.email}
 ```
@@ -500,11 +505,13 @@ private = auth.protected_router(
     tags=["private"],
 )
 
+
 @private.get("")
 async def private_endpoint(
     principal: Principal = Depends(auth.authenticated),
 ) -> dict[str, str]:
     return {"authenticated_user": principal.email}
+
 
 app.include_router(private)
 ```
@@ -653,9 +660,7 @@ Estas funciones son útiles cuando el producto administra migraciones desde su p
 ```python
 from epok_auth.migrate import upgrade_database
 
-upgrade_database(
-    "postgresql://epok_auth:epok_auth@127.0.0.1:5432/epok_auth"
-)
+upgrade_database("postgresql://epok_auth:epok_auth@127.0.0.1:5432/epok_auth")
 ```
 
 ### `check_database(database_url)`
@@ -663,9 +668,7 @@ upgrade_database(
 ```python
 from epok_auth.migrate import check_database
 
-check_database(
-    "postgresql://epok_auth:epok_auth@127.0.0.1:5432/epok_auth"
-)
+check_database("postgresql://epok_auth:epok_auth@127.0.0.1:5432/epok_auth")
 ```
 
 No devuelve datos. Finaliza correctamente cuando no existe drift y lanza una excepción de Alembic cuando detecta diferencias.
@@ -675,9 +678,7 @@ No devuelve datos. Finaliza correctamente cuando no existe drift y lanza una exc
 ```python
 from epok_auth.migrate import downgrade_database
 
-downgrade_database(
-    "postgresql://epok_auth:epok_auth@127.0.0.1:5432/epok_auth"
-)
+downgrade_database("postgresql://epok_auth:epok_auth@127.0.0.1:5432/epok_auth")
 ```
 
 Esta función elimina el esquema al bajar hasta `base`. Úsala únicamente sobre una base de prueba desechable.
