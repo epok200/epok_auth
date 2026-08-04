@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from epok_auth.postgres.tables import SCHEMA, metadata
 
+VERSION_TABLE = "epok_auth_alembic_version"
+VERSION_TABLE_SCHEMA = "public"
+
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -32,8 +35,8 @@ def _include_object(
     reflected: bool,
     _compare_to: object | None,
 ) -> bool:
-    """Exclude Alembic's own revision table, never application objects."""
-    return not (type_ == "table" and reflected and name == "alembic_version")
+    """Exclude only epok-auth's own revision table, never host application objects."""
+    return not (type_ == "table" and reflected and name == VERSION_TABLE)
 
 
 target_metadata = _comparison_metadata()
@@ -48,7 +51,8 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         include_schemas=False,
         include_object=_include_object,
-        version_table_schema="public",
+        version_table=VERSION_TABLE,
+        version_table_schema=VERSION_TABLE_SCHEMA,
         compare_type=True,
     )
     with context.begin_transaction():
@@ -70,7 +74,8 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         include_schemas=False,
         include_object=_include_object,
-        version_table_schema="public",
+        version_table=VERSION_TABLE,
+        version_table_schema=VERSION_TABLE_SCHEMA,
         compare_type=True,
     )
     with context.begin_transaction():
