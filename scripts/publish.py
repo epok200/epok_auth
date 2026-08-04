@@ -623,11 +623,11 @@ def _build_and_smoke_test(
             temporary_path / "sdist",
         )
 
-    status = pipeline.capture(
-        [context.tools.git, "status", "--porcelain", "--untracked-files=no"]
-    )
+    status = pipeline.capture([context.tools.git, "status", "--porcelain", "--untracked-files=no"])
     if status:
-        raise ReleaseError(f"Release checks modified tracked files. Review the working tree:\n{status}")
+        raise ReleaseError(
+            f"Release checks modified tracked files. Review the working tree:\n{status}"
+        )
     return wheel, sdist
 
 
