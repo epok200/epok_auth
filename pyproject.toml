@@ -1,0 +1,106 @@
+[project]
+name = "epok-auth"
+version = "0.1.0a1"
+description = "FastAPI-first authentication and revocable session security for private B2B applications."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "EPOK" }]
+keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+  "Typing :: Typed",
+]
+dependencies = [
+  "email-validator>=2.3,<3",
+  "fastapi>=0.128,<0.140",
+  "pydantic>=2.13,<3",
+  "pydantic-settings>=2.14,<3",
+  "pwdlib[argon2]>=0.3,<0.4",
+  "PyJWT>=2.13,<3",
+]
+
+[project.optional-dependencies]
+postgres = [
+  "alembic>=1.18,<2",
+  "psycopg[binary,pool]>=3.3,<4",
+  "SQLAlchemy>=2.0.51,<2.2",
+]
+cli = ["typer>=0.26,<1"]
+redis = ["redis>=6.4,<7"]
+all = [
+  "alembic>=1.18,<2",
+  "psycopg[binary,pool]>=3.3,<4",
+  "redis>=6.4,<7",
+  "SQLAlchemy>=2.0.51,<2.2",
+  "typer>=0.26,<1",
+]
+
+[project.scripts]
+epok-auth = "epok_auth.cli:app"
+
+[project.urls]
+Repository = "https://github.com/epok200/epok_auth"
+Issues = "https://github.com/epok200/epok_auth/issues"
+
+[build-system]
+requires = ["hatchling>=1.31,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/epok_auth"]
+include = ["src/epok_auth/py.typed", "src/epok_auth/migrations/**/*"]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "pyright>=1.1.406,<2",
+  "pytest>=9.1,<10",
+  "pytest-asyncio>=1.3,<2",
+  "pytest-cov>=7,<8",
+  "ruff>=0.15,<0.16",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-config --strict-markers"
+asyncio_mode = "auto"
+markers = [
+  "integration: requires a disposable PostgreSQL database",
+  "security: security regression and abuse-case coverage",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["epok_auth"]
+omit = ["src/epok_auth/migrations/env.py", "src/epok_auth/migrations/versions/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["A", "ASYNC", "B", "C4", "DTZ", "E", "F", "FAST", "I", "N", "PERF", "PIE", "PL", "PTH", "RUF", "S", "SIM", "T20", "TC", "UP"]
+ignore = ["PLR0913", "PLR2004", "S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S105", "S106", "S107", "PLR2004"]
+"src/epok_auth/cli.py" = ["T201"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+reportMissingTypeStubs = "none"
