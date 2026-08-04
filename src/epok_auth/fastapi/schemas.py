@@ -10,7 +10,7 @@ from epok_auth.models import Principal, ProvisionedUser, SessionBundle, UserAcco
 
 ShortText = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 Capability = Annotated[str, StringConstraints(min_length=1, max_length=100)]
-Credential = Annotated[str, StringConstraints(min_length=1, max_length=1024)]
+Credential = Annotated[str, StringConstraints(min_length=1, max_length=4096)]
 EmailInput = Annotated[str, StringConstraints(min_length=3, max_length=320)]
 
 

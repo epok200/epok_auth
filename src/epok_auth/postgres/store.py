@@ -36,7 +36,7 @@ class PostgresAuthStore:
         echo: bool = False,
     ) -> PostgresAuthStore:
         engine = create_async_engine(
-            _async_psycopg_url(url),
+            async_psycopg_url(url),
             pool_size=pool_size,
             max_overflow=max_overflow,
             pool_timeout=pool_timeout,
@@ -278,7 +278,7 @@ def _session(row: RowMapping) -> RefreshSession:
     )
 
 
-def _async_psycopg_url(url: str) -> str:
+def async_psycopg_url(url: str) -> str:
     if url.startswith("postgresql+psycopg://"):
         return url
     if url.startswith("postgresql://"):

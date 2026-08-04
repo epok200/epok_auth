@@ -1,185 +1,154 @@
 # epok-auth
 
-**FastAPI-first authentication and revocable session security for private B2B applications.**
+**FastAPI-first authentication with PostgreSQL-authoritative, revocable sessions.**
 
-`epok-auth` packages the security plumbing that FastAPI intentionally leaves to the application: local users, Argon2id passwords, short-lived access JWTs, opaque rotating refresh tokens, authoritative PostgreSQL sessions, immediate revocation, CSRF protection, administrative provisioning, audit events, and reusable FastAPI dependencies.
+`epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-The library is deliberately **not** an identity provider and does not own product authorization. Your application still decides what `catalog:write`, `EDITOR`, a tenant membership, or access to a specific resource means.
+> **Status:** `0.1.0b1`. The beta is intended to become the first production candidate for Colors after its CI gate and application parity tests pass. APIs may still change before `1.0`.
 
-> **Status:** `0.1.0a1` is an active pre-release. The implementation is being hardened against PostgreSQL 17 and integrated into Colors before a production tag is declared. Public APIs may change until `1.0`.
+## What the beta includes
 
-## The intended developer experience
+- Argon2id password hashing through `pwdlib`, with rehash support and dummy verification;
+- local users, active/disabled state, roles, scopes, administrative provisioning and reset;
+- short-lived access JWTs with strict issuer, audience, algorithm, type and time validation;
+- opaque refresh credentials stored only as SHA-256 hashes;
+- refresh rotation, session families and reuse detection;
+- immediate access revocation through authoritative PostgreSQL session state;
+- inactivity and absolute session deadlines;
+- secure cookies, CSRF correlation and strict Origin allowlists;
+- account lockout, uniform login failures and security-event persistence;
+- plug-and-play FastAPI routers and dependencies;
+- packaged Alembic migrations and an operational CLI;
+- a Nuxt/Nitro BFF reference where Vue never receives access or refresh tokens.
 
-```python
-from contextlib import asynccontextmanager
+Google OIDC, TOTP/MFA, passkeys, Redis coordination, multi-tenancy and service-to-service authentication remain outside this beta. See [ROADMAP.md](ROADMAP.md).
 
-from fastapi import FastAPI
-from epok_auth import AuthSettings, EpokAuth
-
-settings = AuthSettings()  # reads EPOK_AUTH_* variables and fails closed
-
-auth = EpokAuth.postgres(settings=settings)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    yield
-    await auth.aclose()
-
-
-app = FastAPI(lifespan=lifespan)
-auth.install(app, prefix="/api/v1/auth", include_admin=True)
-
-private = auth.protected_router(prefix="/api/v1/private")
-
-
-@private.get("/hello")
-async def hello():
-    return {"message": "authenticated"}
-
-
-app.include_router(private)
-```
-
-That installation exposes the production contracts for login, refresh, logout, current principal, password change, and—when requested—the minimal administrative user lifecycle.
-
-A router can be protected with a single dependency:
-
-```python
-from fastapi import APIRouter, Depends
-from epok_auth import Principal
-
-router = APIRouter(dependencies=[Depends(auth.authenticated)])
-
-
-@router.get("/me")
-async def endpoint(principal: Principal = Depends(auth.current_user)):
-    return {"email": principal.email}
-```
-
-Roles and scopes remain generic primitives:
-
-```python
-@router.post("/ingest")
-async def ingest(
-    principal: Principal = Depends(auth.require_scopes("catalog:write")),
-):
-    ...
-```
-
-## What v0.1 implements
-
-| Capability | v0.1 behavior |
-|---|---|
-| Local identity | UUID users, normalized email, active/disabled state, roles and scopes |
-| Passwords | Argon2id through `pwdlib`, dummy verification, rehash-on-login, configurable policy |
-| Administrative provisioning | Initial admin CLI, create/list/update/disable/reset users, temporary credentials |
-| Access credential | Short-lived JWT with strict issuer, audience, algorithm, type and time validation |
-| Refresh credential | High-entropy opaque token; only its SHA-256 digest is persisted |
-| Rotation | Every accepted refresh consumes the old credential and creates a replacement |
-| Replay detection | Reuse of a consumed refresh revokes its complete session family |
-| Revocation | Access is checked against authoritative session and user state in PostgreSQL |
-| Session lifetime | Sliding inactivity deadline plus a fixed absolute family deadline |
-| Browser security | Secure/HttpOnly/host-only cookies, CSRF binding, Origin allowlist and no-store responses |
-| Abuse resistance | Uniform login failures, account lockout hooks, bounded inputs and safe errors |
-| FastAPI | Ready routers, OpenAPI contracts, principal caching and role/scope/recent-auth dependencies |
-| Persistence | Official asynchronous PostgreSQL adapter and packaged Alembic migrations |
-| Audit | Structured security events for identity, login, session and administrative transitions |
-
-Google OIDC, invitations, recovery delivery, TOTP, passkeys, Redis coordination, and asymmetric signing are deliberately staged in the [roadmap](ROADMAP.md) rather than being half-implemented in the first production slice.
-
-## Install
-
-During pre-release development:
+## Installation
 
 ```bash
-uv add 'epok-auth[postgres] @ git+https://github.com/epok200/epok_auth.git@codex/auth-foundation'
+uv add "epok-auth[postgres]"
 ```
 
-After the first tagged release:
+Generate a secret and configure the application:
 
 ```bash
-uv add 'epok-auth[postgres]'
+uv run epok-auth generate-secret
 ```
-
-The core package supports Python 3.12–3.14. PostgreSQL support is an explicit extra; Redis is optional and is not an authority for v0.1.
-
-## Configuration
-
-Generate key material:
-
-```bash
-epok-auth generate-secret
-```
-
-Minimal production environment:
 
 ```dotenv
 EPOK_AUTH_ENVIRONMENT=production
-EPOK_AUTH_DATABASE_URL=postgresql://epok_auth:replace-me@postgres.internal/app
+EPOK_AUTH_DATABASE_URL=postgresql://colors:password@postgres/colors
 EPOK_AUTH_JWT_SECRET=<generated-secret>
-EPOK_AUTH_ISSUER=https://auth.colors.example
+EPOK_AUTH_ISSUER=colors-auth
 EPOK_AUTH_AUDIENCE=colors-api
-EPOK_AUTH_TRUSTED_ORIGINS=https://colors.example
+EPOK_AUTH_TRUSTED_ORIGINS=https://colors.example.com
 ```
 
-Production validation intentionally rejects weak secrets, example issuers, insecure cookies, wildcard origins, insufficient password length, and incompatible cookie settings:
+Production configuration is **fail-closed**: weak secrets, insecure cookies, generic issuer/audience values, missing PostgreSQL, and ambiguous origins prevent startup.
+
+## Database and initial administrator
 
 ```bash
-epok-auth check-config
+uv run epok-auth check-config
+uv run epok-auth upgrade-db
+uv run epok-auth create-admin
 ```
 
-Apply the packaged schema and create the first administrator:
+The first administrator is serialized transactionally. A second initial-admin creation attempt fails rather than racing.
 
-```bash
-epok-auth upgrade-db
-epok-auth create-admin
+## FastAPI integration
+
+```python
+from fastapi import Depends, FastAPI
+
+from epok_auth import AuthSettings, EpokAuth, Principal
+
+settings = AuthSettings()
+auth = EpokAuth.postgres(settings=settings)
+
+app = FastAPI()
+auth.install(
+    app,
+    prefix="/api/v1/auth",
+    include_admin=True,
+)
+
+catalog = auth.protected_router(prefix="/api/v1/catalog")
+
+
+@catalog.get("")
+async def get_catalog(
+    principal: Principal = Depends(auth.authenticated),
+) -> dict[str, str]:
+    return {"viewer": principal.email}
+
+
+@catalog.post("")
+async def update_catalog(
+    principal: Principal = Depends(auth.require_scopes("catalog:write")),
+) -> dict[str, str]:
+    return {"editor": principal.email}
+
+
+app.include_router(catalog)
 ```
 
-The administrator password is read through a hidden confirmation prompt and is never printed.
-
-## Installed routes
-
-With the default prefix:
+`auth.install()` exposes:
 
 ```text
 POST /api/v1/auth/login
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
-GET  /api/v1/auth/me
 POST /api/v1/auth/change-password
+GET  /api/v1/auth/me
 ```
 
-With `include_admin=True`:
+With `include_admin=True` it also exposes protected user administration under `/api/v1/auth/users`.
+
+## Application boundary
+
+`epok-auth` owns authentication capabilities:
+
+- credentials and account state;
+- sessions, rotation and revocation;
+- generic roles/scopes;
+- browser transport protections;
+- authentication audit events.
+
+The consuming product still owns:
+
+- tenants and memberships;
+- domain permissions;
+- resource-level authorization;
+- business profiles and data;
+- frontend UI and infrastructure.
+
+A role named `editor` has no meaning until Colors decides what an editor can do.
+
+## Nuxt BFF
+
+The BFF is **not implemented inside the Python library**. The repository includes a reference integration under [`examples/nuxt-bff`](examples/nuxt-bff) that demonstrates this boundary:
 
 ```text
-GET   /api/v1/auth/users
-POST  /api/v1/auth/users
-GET   /api/v1/auth/users/{user_id}
-PATCH /api/v1/auth/users/{user_id}
-POST  /api/v1/auth/users/{user_id}/reset-password
-POST  /api/v1/auth/users/{user_id}/revoke-sessions
+Browser ── HttpOnly opaque session cookie ──> Nuxt/Nitro
+Nuxt/Nitro ── protected access/refresh ──> FastAPI + epok-auth
 ```
 
-There is no public registration endpoint in v0.1. That is an intentional B2B default.
-
-## Nuxt BFF integration
-
-The BFF is **not part of the Python library**. It is the recommended browser boundary and is documented as an integration example.
-
-In the recommended topology:
-
-```text
-Vue browser -> opaque Nuxt session cookie -> Nitro BFF -> access/refresh -> FastAPI
-```
-
-Vue never receives the access or refresh credential. Nitro consumes the FastAPI login response server-side, stores backend credentials in a server-side session store, and forwards only the authenticated user representation to the browser. See [`examples/nuxt_bff`](examples/nuxt_bff) and [`docs/bff.md`](docs/bff.md).
+Vue receives only safe user/session state. Access and refresh credentials remain server-side.
 
 ## Security model
 
-The key properties are described in the [threat model](docs/threat-model.md). Automated evidence for each implemented control is indexed in the [security assurance manifest](docs/security-assurance.md).
+The beta is designed around these invariants:
 
-This repository does **not** claim a third-party security certification or proof of absence of vulnerabilities. It does provide explicit invariants, adversarial regression tests, PostgreSQL concurrency tests, static analysis, dependency review, CodeQL, and a private disclosure process.
+- knowledge of the source code does not grant access;
+- PostgreSQL is the authority for session validity;
+- refresh credentials are one-time, opaque and hashed at rest;
+- replay revokes the whole session family;
+- changing a password, disabling or locking a user revokes sessions;
+- unsafe production configuration fails before serving traffic;
+- authentication errors do not echo secrets or distinguish unknown users.
+
+Read [SECURITY.md](SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), and [docs/SECURITY_ASSURANCE.md](docs/SECURITY_ASSURANCE.md).
 
 ## Development
 
@@ -188,25 +157,7 @@ uv sync --all-extras --group dev
 uv run ruff format --check .
 uv run ruff check .
 uv run pyright
-uv run pytest --cov=epok_auth --cov-report=term-missing
-uv build
+uv run pytest
 ```
 
-PostgreSQL integration tests require a disposable database:
-
-```bash
-export TEST_DATABASE_URL='postgresql://epok_auth:epok_auth@127.0.0.1:5432/epok_auth_test'
-uv run pytest -m integration
-```
-
-## Project boundaries
-
-`epok-auth` owns authentication primitives, credentials, sessions, revocation, generic roles/scopes, web transports and audit events.
-
-The consuming product owns tenants, memberships, resource-level authorization, business profiles, message content, infrastructure, network topology and user interface.
-
-Service-to-service authentication is intentionally outside this repository.
-
-## License and security reports
-
-MIT licensed. Please report vulnerabilities through the private process described in [`SECURITY.md`](SECURITY.md), not through a public issue.
+Pull requests must pass the GitHub Actions `CI / merge-gate`, including PostgreSQL 17, Python 3.12–3.14, branch coverage, packaging and isolated installation.

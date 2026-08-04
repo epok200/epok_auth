@@ -27,6 +27,7 @@ _UNSAFE_SECRETS = frozenset(
     }
 )
 _HTTP_TOKEN = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+_CAPABILITY = re.compile(r"[a-z0-9][a-z0-9:._-]{0,99}")
 
 
 class AuthSettings(BaseSettings):
@@ -55,7 +56,6 @@ class AuthSettings(BaseSettings):
     access_ttl_seconds: int = Field(default=15 * 60, ge=60, le=24 * 60 * 60)
     refresh_idle_ttl_seconds: int = Field(default=7 * 24 * 60 * 60, ge=5 * 60, le=90 * 86400)
     refresh_absolute_ttl_seconds: int = Field(default=30 * 24 * 60 * 60, ge=3600, le=365 * 86400)
-    refresh_reuse_grace_seconds: int = Field(default=0, ge=0, le=30)
 
     login_max_attempts: int = Field(default=5, ge=2, le=100)
     lockout_seconds: int = Field(default=15 * 60, ge=10, le=24 * 60 * 60)
@@ -77,24 +77,36 @@ class AuthSettings(BaseSettings):
     csrf_header_name: str = "X-CSRF-Token"
 
     trusted_origins: tuple[str, ...] = ()
-    validate_origin_when_present: bool = True
+    require_origin: bool = True
 
     admin_role: str = Field(default="admin", min_length=1, max_length=100)
     default_user_role: str = Field(default="user", min_length=1, max_length=100)
 
-    @field_validator("issuer", "audience", "admin_role", "default_user_role")
+    @field_validator("issuer", "audience")
     @classmethod
     def strip_non_empty(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
             raise ValueError("must not be empty")
+        if any(ord(character) < 32 for character in stripped):
+            raise ValueError("must not contain control characters")
         return stripped
+
+    @field_validator("admin_role", "default_user_role")
+    @classmethod
+    def validate_capability(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if _CAPABILITY.fullmatch(normalized) is None:
+            raise ValueError("roles must use lowercase capability syntax")
+        return normalized
 
     @field_validator("cookie_path")
     @classmethod
     def validate_cookie_path(cls, value: str) -> str:
         if not value.startswith("/"):
             raise ValueError("cookie_path must start with '/'")
+        if any(ord(character) < 32 for character in value):
+            raise ValueError("cookie_path must not contain control characters")
         return value
 
     @field_validator("trusted_origins", mode="before")
@@ -126,10 +138,15 @@ class AuthSettings(BaseSettings):
                 or parsed.fragment
             ):
                 raise ValueError("trusted_origins must be scheme-and-host origins without paths")
+            scheme = parsed.scheme.casefold()
             local = host in {"localhost", "127.0.0.1", "::1"}
-            if parsed.scheme.casefold() != "https" and not (parsed.scheme == "http" and local):
+            if scheme != "https" and not (scheme == "http" and local):
                 raise ValueError("trusted origins must use HTTPS, except localhost origins")
-            normalized.append(origin)
+            default_port = (scheme == "https" and parsed.port in (None, 443)) or (
+                scheme == "http" and parsed.port in (None, 80)
+            )
+            canonical = f"{scheme}://{host}" if default_port else f"{scheme}://{host}:{parsed.port}"
+            normalized.append(canonical)
         if len(normalized) != len(set(normalized)):
             raise ValueError("trusted_origins must not contain duplicates")
         return tuple(normalized)
@@ -145,10 +162,13 @@ class AuthSettings(BaseSettings):
     @model_validator(mode="after")
     def validate_security_invariants(self) -> Self:
         secret = self.jwt_secret.get_secret_value()
+        stripped_secret = secret.strip()
+        if secret != stripped_secret or any(ord(character) < 32 for character in secret):
+            raise ValueError("jwt_secret must not contain surrounding or control whitespace")
         if len(secret.encode()) < 32:
             raise ValueError("jwt_secret must contain at least 32 bytes")
-        if secret.strip().casefold() in _UNSAFE_SECRETS:
-            raise ValueError("jwt_secret uses a known public example value")
+        if secret.casefold() in _UNSAFE_SECRETS or len(set(secret)) < 8:
+            raise ValueError("jwt_secret is a weak or public example value")
         if self.access_ttl_seconds >= self.refresh_idle_ttl_seconds:
             raise ValueError("access TTL must be shorter than refresh idle TTL")
         if self.refresh_idle_ttl_seconds > self.refresh_absolute_ttl_seconds:
@@ -165,18 +185,18 @@ class AuthSettings(BaseSettings):
             if self.cookie_path != "/":
                 raise ValueError("__Host- cookies require Path=/")
         if self.environment is Environment.PRODUCTION:
+            if self.database_url is None:
+                raise ValueError("production requires database_url")
             if self.issuer == "epok-auth" or self.audience == "epok-auth-api":
                 raise ValueError("production requires application-specific issuer and audience")
             if not self.secure_cookies:
                 raise ValueError("production requires secure cookies")
             if not self.cookie_use_host_prefix:
                 raise ValueError("production requires __Host- cookie names")
-            if not self.validate_origin_when_present:
-                raise ValueError("production requires origin validation")
+            if not self.require_origin or not self.trusted_origins:
+                raise ValueError("production requires explicit Origin validation")
             if self.password_min_length < 15:
                 raise ValueError("production password minimum must be at least 15 characters")
-            if self.refresh_reuse_grace_seconds != 0:
-                raise ValueError("production requires strict refresh reuse detection")
         return self
 
     @property

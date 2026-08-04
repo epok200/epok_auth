@@ -17,7 +17,7 @@ def _recommended_hash() -> PasswordHash:
         from pwdlib import PasswordHash as PwdlibPasswordHash
 
         return PwdlibPasswordHash.recommended()
-    except ImportError:  # pragma: no cover - fallback only for restricted source checkouts
+    except ImportError:  # pragma: no cover - fallback for restricted source checkouts
         return _Argon2Fallback()
 
 
@@ -62,7 +62,12 @@ class PasswordLengthRule:
 @dataclass(frozen=True, slots=True)
 class CommonPasswordRule:
     denied: frozenset[str] = frozenset(
-        {"123456789012345", "correct horse battery staple", "passwordpassword", "qwertyuiopasdfgh"}
+        {
+            "123456789012345",
+            "correct horse battery staple",
+            "passwordpassword",
+            "qwertyuiopasdfgh",
+        }
     )
 
     def validate(self, password: str) -> None:
@@ -121,6 +126,13 @@ class PasswordManager:
         return PasswordVerification(valid=valid, updated_hash=updated if valid else None)
 
     def verify_for_login(self, password: str, encoded_hash: str | None) -> PasswordVerification:
+        # Bound attacker-controlled work before Argon2 while still executing a dummy verification.
+        if len(password) > 4096:
+            self._password_hash.verify_and_update(
+                "invalid-password-too-long",
+                encoded_hash or self._dummy_hash,
+            )
+            return PasswordVerification(valid=False)
         candidate_hash = encoded_hash or self._dummy_hash
         result = self.verify(password, candidate_hash)
         return result if encoded_hash is not None else PasswordVerification(valid=False)

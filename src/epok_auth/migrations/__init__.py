@@ -1,1 +1,1 @@
-"""Packaged Alembic migration environment for the official PostgreSQL adapter."""
+"""Packaged Alembic migration environment for epok-auth."""
