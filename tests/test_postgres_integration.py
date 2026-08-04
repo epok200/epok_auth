@@ -29,8 +29,34 @@ def sync_url(url: str) -> str:
 def database_url() -> str:
     if not DATABASE_URL:
         pytest.skip("TEST_DATABASE_URL is required")
+
+    # A host application such as Colors owns its own public Alembic history. The
+    # package must never read, overwrite, or delete that revision state.
+    with psycopg.connect(sync_url(DATABASE_URL), autocommit=True) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.alembic_version (
+                version_num varchar(32) PRIMARY KEY
+            )
+            """
+        )
+        connection.execute("TRUNCATE public.alembic_version")
+        connection.execute(
+            "INSERT INTO public.alembic_version (version_num) VALUES ('host_0001')"
+        )
+
     upgrade_database(DATABASE_URL)
     check_database(DATABASE_URL)
+
+    with psycopg.connect(sync_url(DATABASE_URL)) as connection:
+        host_revision = connection.execute(
+            "SELECT version_num FROM public.alembic_version"
+        ).fetchone()
+        package_revision = connection.execute(
+            "SELECT version_num FROM public.epok_auth_alembic_version"
+        ).fetchone()
+    assert host_revision == ("host_0001",)
+    assert package_revision == ("0001_initial",)
     return DATABASE_URL
 
 
