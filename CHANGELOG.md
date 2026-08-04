@@ -1,8 +1,19 @@
 # Changelog
 
-## 0.1.0b1 — unreleased beta candidate
+## Unreleased
 
-First production-candidate beta for the Colors integration:
+- replace the duplicated shell release implementation with a Rich/Typer Python orchestrator;
+- run the release CLI through isolated PEP 723 dependencies;
+- validate Python 3.12, 3.13 and 3.14 locally without replacing the project `.venv`;
+- execute PostgreSQL 17 migrations, drift, integration, concurrency and coverage locally;
+- build and smoke-test both wheel and source distribution;
+- publish, create the annotated tag and verify the public PyPI installation in one command;
+- add regression tests for `.env.secret` parsing and Docker port discovery;
+- retain `scripts/publish.sh` as a compatibility alias.
+
+## 0.1.0b1 — 2026-08-04
+
+First public beta and production-candidate foundation for the Colors integration:
 
 - local user administration;
 - Argon2id credentials with dummy verification and rehash support;
@@ -20,8 +31,8 @@ First production-candidate beta for the Colors integration:
 - guarded local publication through `uv build --no-sources` and `uv publish`;
 - ignored local PyPI credentials with repository safeguards;
 - CodeQL, dependency audit, strict typing and Ruff security rules;
-- 102 passing tests with branch-aware coverage above 90%;
+- branch-aware coverage above 90%;
 - Python 3.12, 3.13 and 3.14 validation;
 - PostgreSQL 17 integration and concurrency validation.
 
-The standalone beta gate is green. Colors backend/frontend parity, deployment configuration and application authorization remain required before product rollout.
+The standalone beta is published on PyPI and tagged as `v0.1.0b1`. Colors backend/frontend parity, deployment configuration and application authorization remain required before product rollout.

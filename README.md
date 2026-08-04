@@ -4,7 +4,7 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-> **Status:** `0.1.0b1` beta candidate. The standalone library gate is green. Colors integration and application-level parity remain required before using this beta in that product. Public APIs may still change before `1.0`.
+> **Status:** `0.1.0b1` public beta on PyPI. The standalone library gate is green. Colors integration and application-level parity remain required before using this beta in that product. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -44,10 +44,8 @@ Google OIDC, TOTP/MFA, passkeys, Redis coordination, multi-tenancy and service-t
 
 ## Installation
 
-Until the beta is published to PyPI, consume the reviewed commit or Git tag explicitly. After publication:
-
 ```bash
-uv add "epok-auth[postgres]"
+uv add "epok-auth[postgres]==0.1.0b1"
 ```
 
 Generate a secret and configure the application:
@@ -78,15 +76,20 @@ uv version --bump stable
 uv version --bump patch
 ```
 
-Local PyPI credentials belong in an ignored `.env.secret` file. Validate or publish only from a clean `main` checkout:
+`uv version --short` prints the current project version, not the installed version of `uv`.
+
+Local PyPI credentials belong in an ignored `.env.secret` file. The complete release pipeline is a single Python command:
 
 ```bash
 cp .env.secret.example .env.secret
-bash scripts/publish.sh --dry-run
-bash scripts/publish.sh
+uv run scripts/publish.py --validate-only
+uv run scripts/publish.py --dry-run
+uv run scripts/publish.py
 ```
 
-The script runs the release checks, builds with `uv build --no-sources`, installs the wheel in an isolated environment and asks for the exact version before uploading. See [docs/PUBLISHING.md](docs/PUBLISHING.md) for the complete procedure.
+The normal command validates Python 3.12–3.14, launches disposable PostgreSQL 17, runs migrations, drift checks, integration, concurrency and coverage, builds and installs wheel/sdist, simulates the upload, publishes after an exact-version confirmation, pushes the tag and verifies the public PyPI installation.
+
+The script uses inline PEP 723 dependencies and `uv run --isolated`, so it does not replace the developer's project `.venv`. The legacy `bash scripts/publish.sh` command remains as a thin alias. See [docs/PUBLISHING.md](docs/PUBLISHING.md) for the complete procedure.
 
 ## Database and initial administrator
 
