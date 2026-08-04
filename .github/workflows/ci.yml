@@ -33,11 +33,12 @@ jobs:
         run: |
           test -f uv.lock
           uv lock --check
-      - name: Validate release safeguards
+      - name: Validate release safeguards and CLI
         run: |
           git check-ignore -q .env.secret
           ! git ls-files --error-unmatch .env.secret 2>/dev/null
           bash -n scripts/publish.sh
+          uv run scripts/publish.py --help
       - name: Install all dependencies
         run: uv sync --locked --all-extras --group dev --python 3.12
       - name: Formatting
@@ -47,7 +48,7 @@ jobs:
       - name: Strict typing
         run: uv run pyright
       - name: Compile all modules
-        run: uv run python -m compileall -q src tests examples/minimal
+        run: uv run python -m compileall -q src tests examples/minimal scripts/publish.py
       - name: Dependency vulnerability audit
         run: uv run pip-audit --local --progress-spinner off
 
