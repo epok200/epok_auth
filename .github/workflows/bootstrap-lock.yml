@@ -1,0 +1,37 @@
+name: Bootstrap lockfile once
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/auth-foundation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: codex/auth-foundation
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: "0.12.1"
+      - name: Generate and commit the reproducible lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f uv.lock ]; then
+            echo "uv.lock already exists."
+            exit 0
+          fi
+          uv lock
+          git config user.name "epok-auth lock bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: lock beta dependencies"
+          git push origin HEAD:codex/auth-foundation
