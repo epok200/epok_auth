@@ -115,6 +115,7 @@ jobs:
           PY
       - name: Format and verify source typing
         run: |
+          uv run ruff check --fix src
           uv run ruff format src pyproject.toml
           uv run ruff check src
           uv run pyright
