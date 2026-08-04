@@ -1,8 +1,33 @@
 # Publicación y versionado
 
-Esta guía deja `epok-auth` listo para publicarse desde un checkout limpio y actualizado de `main` usando `uv` y un token local de PyPI.
+`epok-auth` se publica desde un checkout limpio y actualizado de `main` mediante un único orquestador Python:
 
-## Decisiones del proyecto
+```bash
+uv run scripts/publish.py
+```
+
+El script usa metadata PEP 723, por lo que `uv` ejecuta el orquestador en un entorno aislado con Typer, Rich y Packaging. No depende de la versión de Python activa en `.venv` ni reemplaza el entorno local del proyecto durante la publicación.
+
+El antiguo comando continúa disponible como alias de compatibilidad:
+
+```bash
+bash scripts/publish.sh
+```
+
+## Requisitos
+
+La máquina de publicación necesita:
+
+```text
+Git
+uv
+Docker en ejecución
+acceso a GitHub y PyPI
+```
+
+Docker se utiliza para ejecutar PostgreSQL 17 en un contenedor desechable durante las pruebas de migración, drift, integración, concurrencia y cobertura.
+
+## Fuente única de versión
 
 La versión se declara una sola vez en `pyproject.toml`:
 
@@ -11,153 +36,194 @@ La versión se declara una sola vez en `pyproject.toml`:
 version = "0.1.0b1"
 ```
 
-`epok_auth.__version__` se obtiene mediante `importlib.metadata`, por lo que no hay una segunda constante que mantener. `uv version` actualiza el proyecto y, salvo que se indique lo contrario, también actualiza `uv.lock`.
+`epok_auth.__version__` se obtiene mediante `importlib.metadata`, así que no existe una segunda constante que mantener.
 
-Hatchling permanece como backend PEP 517 porque empaqueta correctamente el código, `py.typed` y las migraciones Alembic. `uv` administra el entorno, la versión, el lockfile, el build y la publicación.
-
-## Consultar y cambiar la versión
-
-Consultar únicamente la versión actual:
+Este comando imprime únicamente la versión del proyecto actual:
 
 ```bash
 uv version --short
 ```
 
-Pasar de una beta a la siguiente:
+No muestra la versión instalada de `uv`; para eso se utiliza `uv --version`.
+
+## Cambiar la versión
+
+Siguiente beta:
 
 ```bash
 uv version --bump beta
 ```
-
-Ejemplo:
 
 ```text
 0.1.0b1 -> 0.1.0b2
 ```
 
-Cerrar una prerelease como versión estable:
+Cerrar la prerelease como estable:
 
 ```bash
 uv version --bump stable
 ```
 
-Ejemplo:
-
 ```text
 0.1.0b2 -> 0.1.0
 ```
 
-Crear el siguiente patch estable:
+Siguiente patch estable:
 
 ```bash
 uv version --bump patch
 ```
 
-Después de cualquier cambio de versión, revisa y confirma ambos archivos:
+Después de cambiar la versión:
 
 ```bash
 git diff -- pyproject.toml uv.lock
 git add pyproject.toml uv.lock
 git commit -m "chore: bump epok-auth to $(uv version --short)"
+git push origin main
 ```
 
-Para la primera publicación no ejecutes un bump: la versión preparada es `0.1.0b1`. Es una beta pública deliberadamente, porque la integración completa con Colors todavía no forma parte de la evidencia de esta release.
+Espera a que CI y CodeQL estén verdes antes de publicar.
 
-## Preparar el token local
+## Token local de PyPI
 
-Copia el template:
+Crea el archivo local desde el template:
 
 ```bash
 cp .env.secret.example .env.secret
+chmod 600 .env.secret
 ```
 
-Edita `.env.secret` y coloca el token:
+Contenido:
 
 ```dotenv
 UV_PUBLISH_TOKEN="pypi-..."
 ```
 
-El archivo admite únicamente esa variable y comentarios. El script lo analiza como datos y **no lo ejecuta como código shell**. Además, se detiene si `.env.secret` está trackeado o dejó de estar ignorado por Git.
+`.env.secret` está ignorado por Git. El orquestador lo interpreta como datos mediante un parser restringido; nunca lo ejecuta como shell. Solo admite comentarios y una definición de `UV_PUBLISH_TOKEN`.
 
-Para la primera carga puedes utilizar un token con alcance para toda tu cuenta. Después de que PyPI cree el proyecto, reemplázalo por un token limitado exclusivamente a `epok-auth`. A largo plazo conviene migrar a Trusted Publishing con OIDC para eliminar tokens permanentes.
+Después de crear el proyecto en PyPI, utiliza preferentemente un token limitado únicamente a `epok-auth`.
 
-## Validación sin publicar
+## Modos del pipeline
 
-Parte de un `main` limpio y actualizado:
+### Validar la versión actual
 
 ```bash
-git checkout main
-git pull --ff-only
-bash scripts/publish.sh --dry-run
+uv run scripts/publish.py --validate-only
 ```
 
-El script verifica que el commit local coincida exactamente con `origin/main` y ejecuta:
+Ejecuta toda la validación local, el build y los smoke tests, pero no consulta ni modifica PyPI y no crea tags. Es el modo adecuado para volver a probar una versión que ya fue publicada, como `0.1.0b1`.
+
+### Simular una release nueva
+
+```bash
+uv run scripts/publish.py --dry-run
+```
+
+Ejecuta todas las verificaciones y termina con `uv publish --dry-run`. No sube artefactos ni crea tags. La versión debe ser nueva y no tener un tag existente.
+
+### Publicar
+
+```bash
+uv run scripts/publish.py
+```
+
+Después de superar todas las compuertas, solicita escribir la versión exacta. Si coincide, publica, crea y empuja el tag anotado y verifica la instalación desde PyPI.
+
+Para publicar sin crear el tag automáticamente:
+
+```bash
+uv run scripts/publish.py --no-tag
+```
+
+## Validaciones ejecutadas
+
+El comando normal realiza, en orden:
 
 ```text
+rama main y árbol limpio
+main local idéntico a origin/main
+.env.secret ignorado y no trackeado
+versión PEP 440 válida y tag todavía inexistente
 uv lock --check
-instalación reproducible
-Ruff format y lint
+Ruff format
+Ruff lint y reglas de seguridad
 Pyright estricto
-suite no integrada
+compileall
+pip-audit
+suite no integrada en Python 3.12
+suite no integrada en Python 3.13
+suite no integrada en Python 3.14
+PostgreSQL 17 desechable en Docker
+migración desde una base vacía
+cero drift Alembic
+pruebas PostgreSQL y de concurrencia
+cobertura branch-aware mínima de 90%
 uv build --no-sources
-verificación del wheel y del sdist
+exactamente un wheel y un sdist
 instalación aislada del wheel
 instalación aislada del sdist
-coincidencia de importlib.metadata y epok_auth.__version__
+versión runtime igual a la metadata
 smoke test del CLI
-uv publish --dry-run contra PyPI
+uv publish --dry-run
+confirmación humana de la versión
+uv publish
+tag anotado y push a origin
+instalación pública desde PyPI con reintentos
 ```
 
-Las pruebas PostgreSQL, cobertura completa y CodeQL deben estar verdes previamente en GitHub Actions. La CI también construye e instala de forma aislada tanto el wheel como el source distribution.
+Los comandos de proyecto se ejecutan con `uv run --isolated`, por lo que la validación no cambia el `.venv` que utiliza el desarrollador.
 
-## Publicar
+El contenedor PostgreSQL se elimina en un bloque de limpieza aunque una prueba falle o el proceso sea interrumpido.
 
-Desde `main`, con CI verde y `.env.secret` configurado:
+## Primera ejecución después de esta mejora
+
+`0.1.0b1` ya fue publicada y tiene el tag `v0.1.0b1`. Por tanto, para comprobar ahora el pipeline utiliza:
 
 ```bash
-bash scripts/publish.sh
+uv run scripts/publish.py --validate-only
 ```
 
-El script vuelve a construir todo desde cero y solicita escribir la versión exacta antes de ejecutar la subida. Para esta beta deberás confirmar:
+No intentes volver a publicar `0.1.0b1`: las versiones de PyPI son inmutables.
 
-```text
-0.1.0b1
-```
-
-PyPI trata cada versión como inmutable. Si necesitas cambiar el contenido después de publicarla, crea una versión nueva; no intentes reutilizar el mismo número. Para la siguiente beta:
+Para una futura beta:
 
 ```bash
 uv version --bump beta
+git add pyproject.toml uv.lock
+git commit -m "chore: bump epok-auth to $(uv version --short)"
+git push origin main
 ```
 
-## Crear el tag después de publicar
-
-Cuando la subida haya terminado correctamente:
+Después:
 
 ```bash
-VERSION="$(uv version --short)"
-git tag -a "v$VERSION" -m "epok-auth $VERSION"
-git push origin "v$VERSION"
+uv run scripts/publish.py --dry-run
+uv run scripts/publish.py
 ```
 
-El script de publicación rechaza una versión cuyo tag ya exista. El orden deliberado es **publicar primero y etiquetar después**, para no dejar un tag de release apuntando a una carga fallida.
+## Recuperación después de una publicación parcial
 
-Después puedes crear una GitHub Release utilizando el contenido correspondiente de `CHANGELOG.md`.
-
-## Verificar la instalación publicada
+Si `uv publish` termina correctamente pero la propagación de PyPI tarda, no vuelvas a cargar la misma versión. El script reintenta la instalación pública varias veces; si aun así falla, verifica más tarde con:
 
 ```bash
 VERSION="$(uv version --short)"
 uv run \
-  --with "epok-auth[postgres]==$VERSION" \
   --no-project \
   --refresh-package epok-auth \
+  --with "epok-auth[postgres]==$VERSION" \
   -- python -c 'import epok_auth; print(epok_auth.__version__)'
 ```
 
-La salida debe coincidir exactamente con `uv version --short`.
+Si PyPI fue publicado pero el push del tag falló, el orquestador muestra el comando de recuperación:
 
-## Secuencia para cerrar `0.1.0`
+```bash
+git push origin "v$(uv version --short)"
+```
+
+Nunca reutilices el mismo número para artefactos diferentes.
+
+## Cerrar `0.1.0`
 
 Después de validar la beta dentro de Colors:
 
@@ -170,9 +236,9 @@ git commit -m "chore: release epok-auth 0.1.0"
 git push origin main
 ```
 
-Espera a que CI y CodeQL estén verdes y después ejecuta:
+Con CI y CodeQL verdes:
 
 ```bash
-bash scripts/publish.sh --dry-run
-bash scripts/publish.sh
+uv run scripts/publish.py --dry-run
+uv run scripts/publish.py
 ```
