@@ -65,7 +65,7 @@ refresh_session = Table(
     Column(
         "user_id",
         Uuid(as_uuid=True),
-        ForeignKey(f"{SCHEMA}.user_account.id", ondelete="RESTRICT"),
+        ForeignKey("user_account.id", ondelete="RESTRICT"),
         nullable=False,
     ),
     Column("family_id", Uuid(as_uuid=True), nullable=False),
@@ -80,7 +80,7 @@ refresh_session = Table(
     Column(
         "replaced_by_id",
         Uuid(as_uuid=True),
-        ForeignKey(f"{SCHEMA}.refresh_session.id", ondelete="SET NULL"),
+        ForeignKey("refresh_session.id", ondelete="SET NULL"),
     ),
     UniqueConstraint("token_hash", name="uq_epok_auth_refresh_token_hash"),
     UniqueConstraint("replaced_by_id", name="uq_epok_auth_refresh_replacement"),
@@ -111,12 +111,12 @@ security_event = Table(
     Column(
         "user_id",
         Uuid(as_uuid=True),
-        ForeignKey(f"{SCHEMA}.user_account.id", ondelete="SET NULL"),
+        ForeignKey("user_account.id", ondelete="SET NULL"),
     ),
     Column(
         "session_id",
         Uuid(as_uuid=True),
-        ForeignKey(f"{SCHEMA}.refresh_session.id", ondelete="SET NULL"),
+        ForeignKey("refresh_session.id", ondelete="SET NULL"),
     ),
     Column("request_id", Text),
     Column("ip_address", Text),
