@@ -36,7 +36,11 @@ def do_run_migrations(connection: Connection) -> None:
     # PostgreSQL omits the schema from same-schema foreign-key reflection. Treating
     # epok_auth as the default schema makes reflected and declarative metadata
     # canonical without hiding real foreign-key drift.
+    #
+    # Executing SET starts an implicit SQLAlchemy transaction. Commit that session
+    # setup first so Alembic owns and commits the subsequent transactional DDL.
     connection.execute(text(f'SET search_path TO "{SCHEMA}", public'))
+    connection.commit()
     connection.dialect.default_schema_name = SCHEMA
     context.configure(
         connection=connection,
