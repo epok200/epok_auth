@@ -48,7 +48,11 @@ jobs:
           test -f .bootstrap/archive.part001
           test "$(find .bootstrap -maxdepth 1 -name 'archive.part*' | wc -l)" -eq 2
 
-          cat .bootstrap/archive.part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
+          : > /tmp/epok-auth.tar.gz
+          for part in .bootstrap/archive.part*; do
+            tr -d '\r\n ' < "$part" | base64 --decode >> /tmp/epok-auth.tar.gz
+          done
+
           echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
 
           tar -tzf /tmp/epok-auth.tar.gz > /tmp/archive-files.txt
