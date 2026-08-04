@@ -17,6 +17,17 @@ if config.config_file_name is not None:
 target_metadata = metadata
 
 
+def _include_object(
+    _object: object,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    _compare_to: object | None,
+) -> bool:
+    """Exclude Alembic's control table without hiding application schema drift."""
+    return not (type_ == "table" and reflected and name == "alembic_version")
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -25,6 +36,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
+        include_object=_include_object,
         compare_type=True,
     )
     with context.begin_transaction():
@@ -36,6 +48,7 @@ def do_run_migrations(connection: Connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         include_schemas=True,
+        include_object=_include_object,
         compare_type=True,
     )
     with context.begin_transaction():
