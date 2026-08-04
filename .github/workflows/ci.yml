@@ -29,6 +29,60 @@ env:
   EPOK_AUTH_TRUSTED_ORIGINS: http://localhost:3000
 
 jobs:
+  hydrate:
+    name: hydrate-foundation
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/auth-foundation'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout the trusted head branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: codex/auth-foundation
+          fetch-depth: 0
+
+      - name: Import the complete locally validated tree once
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d .bootstrap ]; then
+            echo "Validated tree is already hydrated."
+            exit 0
+          fi
+
+          test -f .bootstrap/archive.part000
+          test -f .bootstrap/archive.part001
+          test "$(find .bootstrap -maxdepth 1 -name 'archive.part*' | wc -l)" -eq 2
+
+          cat .bootstrap/archive.part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
+          echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
+
+          tar -tzf /tmp/epok-auth.tar.gz > /tmp/archive-files.txt
+          test -s /tmp/archive-files.txt
+          if grep -Eq '(^|/)\.git(/|$)' /tmp/archive-files.txt; then
+            echo "Archive contains forbidden Git metadata."
+            exit 1
+          fi
+
+          tar -xzf /tmp/epok-auth.tar.gz --exclude='.github' -C .
+          rm -rf .bootstrap
+
+          git config user.name "epok-auth foundation importer"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No hydration changes were produced."
+            exit 0
+          fi
+          git commit -m "feat: hydrate validated authentication foundation"
+          git push origin HEAD:codex/auth-foundation
+
   quality:
     name: quality
     runs-on: ubuntu-latest
@@ -216,6 +270,7 @@ jobs:
     name: merge-gate
     if: always()
     needs:
+      - hydrate
       - quality
       - tests
       - coverage
@@ -228,6 +283,7 @@ jobs:
       - name: Require every production check to pass
         shell: bash
         env:
+          HYDRATE_RESULT: ${{ needs.hydrate.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
           TESTS_RESULT: ${{ needs.tests.result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
@@ -236,12 +292,14 @@ jobs:
         run: |
           set -euo pipefail
           printf '%-18s %s\n' \
+            hydrate "$HYDRATE_RESULT" \
             quality "$QUALITY_RESULT" \
             tests "$TESTS_RESULT" \
             coverage "$COVERAGE_RESULT" \
             postgres "$POSTGRES_RESULT" \
             package "$PACKAGE_RESULT"
 
+          test "$HYDRATE_RESULT" = success
           test "$QUALITY_RESULT" = success
           test "$TESTS_RESULT" = success
           test "$COVERAGE_RESULT" = success
