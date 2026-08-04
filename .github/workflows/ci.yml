@@ -2,11 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +19,7 @@ env:
   TEST_DATABASE_URL: postgresql+psycopg://epok_auth:epok_auth@127.0.0.1:5432/epok_auth_test
   EPOK_AUTH_ENVIRONMENT: test
   EPOK_AUTH_DATABASE_URL: postgresql+psycopg://epok_auth:epok_auth@127.0.0.1:5432/epok_auth_test
-  EPOK_AUTH_JWT_SECRET: ci-only-epok-auth-secret-000000000000000000000000
+  EPOK_AUTH_JWT_SECRET: ci-only-epok-auth-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
   EPOK_AUTH_ISSUER: epok-auth-ci
   EPOK_AUTH_AUDIENCE: epok-auth-ci-api
   EPOK_AUTH_SECURE_COOKIES: "false"
@@ -29,96 +27,33 @@ env:
   EPOK_AUTH_TRUSTED_ORIGINS: http://localhost:3000
 
 jobs:
-  hydrate:
-    name: hydrate-foundation
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'codex/auth-foundation'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout the trusted head branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: codex/auth-foundation
-          fetch-depth: 0
-
-      - name: Import the complete locally validated tree once
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -d .bootstrap ]; then
-            echo "Validated tree is already hydrated."
-            exit 0
-          fi
-
-          test -f .bootstrap/archive.part000
-          test -f .bootstrap/archive.part001
-          test "$(find .bootstrap -maxdepth 1 -name 'archive.part*' | wc -l)" -eq 2
-
-          cat .bootstrap/archive.part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
-          echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
-
-          tar -tzf /tmp/epok-auth.tar.gz > /tmp/archive-files.txt
-          test -s /tmp/archive-files.txt
-          if grep -Eq '(^|/)\.git(/|$)' /tmp/archive-files.txt; then
-            echo "Archive contains forbidden Git metadata."
-            exit 1
-          fi
-
-          tar -xzf /tmp/epok-auth.tar.gz --exclude='.github' -C .
-          rm -rf .bootstrap
-
-          git config user.name "epok-auth foundation importer"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No hydration changes were produced."
-            exit 0
-          fi
-          git commit -m "feat: hydrate validated authentication foundation"
-          git push origin HEAD:codex/auth-foundation
-
   quality:
     name: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 12
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
+          version: "0.12.1"
           enable-cache: true
-
-      - name: Install Python 3.12
-        run: uv python install 3.12
-
-      - name: Verify lockfile
+      - run: uv python install 3.12
+      - name: Require reproducible lockfile
         run: |
           test -f uv.lock
           uv lock --check
-
-      - name: Install all development dependencies
+      - name: Install all dependencies
         run: uv sync --locked --all-extras --group dev --python 3.12
-
-      - name: Check formatting
+      - name: Formatting
         run: uv run ruff format --check .
-
-      - name: Lint
+      - name: Lint and security rules
         run: uv run ruff check .
-
-      - name: Strict type checking
+      - name: Strict typing
         run: uv run pyright
-
-      - name: Compile all Python modules
-        run: uv run python -m compileall -q src tests
+      - name: Compile all modules
+        run: uv run python -m compileall -q src tests examples/minimal
+      - name: Dependency vulnerability audit
+        run: uv run pip-audit --local --progress-spinner off
 
   tests:
     name: tests-py${{ matrix.python-version }}
@@ -127,63 +62,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version:
-          - "3.12"
-          - "3.13"
-          - "3.14"
-
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
+          version: "0.12.1"
           enable-cache: true
-
-      - name: Install Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install project
-        run: uv sync --locked --all-extras --group dev --python ${{ matrix.python-version }}
-
-      - name: Run unit, HTTP and security tests
+      - run: uv python install ${{ matrix.python-version }}
+      - run: uv sync --locked --all-extras --group dev --python ${{ matrix.python-version }}
+      - name: Unit, HTTP and adversarial suite
         run: uv run --python ${{ matrix.python-version }} pytest -m "not integration" -q
-
-  coverage:
-    name: coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
-        with:
-          enable-cache: true
-
-      - name: Install Python 3.12
-        run: uv python install 3.12
-
-      - name: Install project
-        run: uv sync --locked --all-extras --group dev --python 3.12
-
-      - name: Enforce branch coverage
-        run: >-
-          uv run pytest -m "not integration"
-          --cov=epok_auth
-          --cov-branch
-          --cov-report=term-missing
-          --cov-report=xml
-          --cov-fail-under=90
 
   postgres:
     name: postgres-17
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     services:
       postgres:
         image: postgres:17-alpine
@@ -191,117 +85,121 @@ jobs:
           POSTGRES_USER: epok_auth
           POSTGRES_PASSWORD: epok_auth
           POSTGRES_DB: epok_auth_test
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U epok_auth -d epok_auth_test"
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
+          version: "0.12.1"
           enable-cache: true
-
-      - name: Install Python 3.12
-        run: uv python install 3.12
-
-      - name: Install project
-        run: uv sync --locked --all-extras --group dev --python 3.12
-
-      - name: Apply packaged migrations from an empty database
-        run: |
-          uv run python - <<'PY'
-          import os
-          from epok_auth.migrate import upgrade_database
-
-          upgrade_database(os.environ["TEST_DATABASE_URL"])
-          PY
-
-      - name: Run PostgreSQL integration and concurrency tests
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-extras --group dev --python 3.12
+      - name: Migrate from an empty database
+        run: uv run epok-auth upgrade-db
+      - name: Assert metadata has no migration drift
+        run: uv run epok-auth check-db
+      - name: PostgreSQL integration and concurrency suite
         run: uv run pytest -m integration -q
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: epok_auth
+          POSTGRES_PASSWORD: epok_auth
+          POSTGRES_DB: epok_auth_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U epok_auth -d epok_auth_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: "0.12.1"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-extras --group dev --python 3.12
+      - run: uv run epok-auth upgrade-db
+      - name: Enforce branch coverage across unit and PostgreSQL paths
+        run: >-
+          uv run pytest
+          --cov=epok_auth
+          --cov-branch
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=90
 
   package:
     name: package
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
+          version: "0.12.1"
           enable-cache: true
-
-      - name: Install Python 3.12
-        run: uv python install 3.12
-
+      - run: uv python install 3.12
       - name: Build wheel and source distribution
         run: uv build
-
-      - name: Install wheel in an isolated environment
+      - name: Verify packaged files
         shell: bash
         run: |
           set -euo pipefail
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
           test -n "$wheel"
+          python -m zipfile -l "$wheel" | grep 'epok_auth/migrations/versions/0001_initial.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/py.typed'
+      - name: Isolated installation and public API smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
           uv venv /tmp/epok-auth-smoke --python 3.12
           uv pip install --python /tmp/epok-auth-smoke/bin/python "$wheel"
           /tmp/epok-auth-smoke/bin/python - <<'PY'
           import epok_auth
           from epok_auth import AuthSettings, EpokAuth
 
-          assert epok_auth.__version__
+          assert epok_auth.__version__ == "0.1.0b1"
           assert AuthSettings is not None
           assert EpokAuth is not None
           PY
-
-      - name: Verify packaged CLI entry point
-        run: /tmp/epok-auth-smoke/bin/epok-auth --help
+          /tmp/epok-auth-smoke/bin/epok-auth --help
+          /tmp/epok-auth-smoke/bin/epok-auth generate-secret --bytes 32 | grep -E '.{40,}'
 
   merge-gate:
     name: merge-gate
     if: always()
-    needs:
-      - hydrate
-      - quality
-      - tests
-      - coverage
-      - postgres
-      - package
+    needs: [quality, tests, postgres, coverage, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
     steps:
-      - name: Require every production check to pass
+      - name: Require every beta gate to pass
         shell: bash
         env:
-          HYDRATE_RESULT: ${{ needs.hydrate.result }}
-          QUALITY_RESULT: ${{ needs.quality.result }}
-          TESTS_RESULT: ${{ needs.tests.result }}
-          COVERAGE_RESULT: ${{ needs.coverage.result }}
-          POSTGRES_RESULT: ${{ needs.postgres.result }}
-          PACKAGE_RESULT: ${{ needs.package.result }}
+          QUALITY: ${{ needs.quality.result }}
+          TESTS: ${{ needs.tests.result }}
+          POSTGRES: ${{ needs.postgres.result }}
+          COVERAGE: ${{ needs.coverage.result }}
+          PACKAGE: ${{ needs.package.result }}
         run: |
           set -euo pipefail
-          printf '%-18s %s\n' \
-            hydrate "$HYDRATE_RESULT" \
-            quality "$QUALITY_RESULT" \
-            tests "$TESTS_RESULT" \
-            coverage "$COVERAGE_RESULT" \
-            postgres "$POSTGRES_RESULT" \
-            package "$PACKAGE_RESULT"
-
-          test "$HYDRATE_RESULT" = success
-          test "$QUALITY_RESULT" = success
-          test "$TESTS_RESULT" = success
-          test "$COVERAGE_RESULT" = success
-          test "$POSTGRES_RESULT" = success
-          test "$PACKAGE_RESULT" = success
+          printf '%-12s %s\n' quality "$QUALITY" tests "$TESTS" postgres "$POSTGRES" coverage "$COVERAGE" package "$PACKAGE"
+          test "$QUALITY" = success
+          test "$TESTS" = success
+          test "$POSTGRES" = success
+          test "$COVERAGE" = success
+          test "$PACKAGE" = success
