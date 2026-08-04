@@ -122,10 +122,7 @@ class Pipeline:
         if check:
             self.results.append(StepResult(title, elapsed))
             if not quiet:
-                console.print(
-                    f"[bold green]✓[/bold green] {title} "
-                    f"[dim]({elapsed:.1f}s)[/dim]"
-                )
+                console.print(f"[bold green]✓[/bold green] {title} [dim]({elapsed:.1f}s)[/dim]")
         return completed
 
     def capture(self, command: list[str], *, check: bool = True) -> str:
@@ -170,9 +167,7 @@ def _parse_secret_value(raw: str) -> str:
         try:
             parsed = ast.literal_eval(value)
         except (SyntaxError, ValueError) as error:
-            raise ReleaseError(
-                f"{TOKEN_NAME} has invalid quoting in .env.secret."
-            ) from error
+            raise ReleaseError(f"{TOKEN_NAME} has invalid quoting in .env.secret.") from error
         if not isinstance(parsed, str):
             raise ReleaseError(f"{TOKEN_NAME} must be a string.")
         return parsed
@@ -203,9 +198,7 @@ def parse_secret_text(text: str) -> str | None:
 
 def _load_publish_token() -> str | None:
     file_token = (
-        parse_secret_text(SECRET_FILE.read_text(encoding="utf-8"))
-        if SECRET_FILE.exists()
-        else None
+        parse_secret_text(SECRET_FILE.read_text(encoding="utf-8")) if SECRET_FILE.exists() else None
     )
     environment_token = os.environ.get(TOKEN_NAME)
     if file_token and environment_token and file_token != environment_token:
@@ -247,13 +240,10 @@ def _validate_repository(
     branch = pipeline.capture([tools.git, "branch", "--show-current"])
     if branch != "main":
         raise ReleaseError(
-            f"Releases are allowed only from main; current branch: "
-            f"{branch or 'detached'}."
+            f"Releases are allowed only from main; current branch: {branch or 'detached'}."
         )
 
-    status = pipeline.capture(
-        [tools.git, "status", "--porcelain", "--untracked-files=normal"]
-    )
+    status = pipeline.capture([tools.git, "status", "--porcelain", "--untracked-files=normal"])
     if status:
         raise ReleaseError(f"The working tree must be clean before releasing:\n{status}")
 
@@ -404,13 +394,10 @@ def _start_postgres(pipeline: Pipeline, tools: Toolchain) -> PostgresRuntime:
     )
     try:
         _wait_for_postgres(pipeline, tools, container_name)
-        port_output = pipeline.capture(
-            [tools.docker, "port", container_name, "5432/tcp"]
-        )
+        port_output = pipeline.capture([tools.docker, "port", container_name, "5432/tcp"])
         port = parse_docker_port(port_output)
         database_url = (
-            "postgresql+psycopg://epok_auth:epok_auth@"
-            f"127.0.0.1:{port}/epok_auth_release"
+            f"postgresql+psycopg://epok_auth:epok_auth@127.0.0.1:{port}/epok_auth_release"
         )
         return PostgresRuntime(container_name, database_url)
     except Exception:
@@ -640,10 +627,7 @@ def _build_and_smoke_test(
         [context.tools.git, "status", "--porcelain", "--untracked-files=no"]
     )
     if status:
-        raise ReleaseError(
-            "Release checks modified tracked files. Review the working tree:\n"
-            f"{status}"
-        )
+        raise ReleaseError(f"Release checks modified tracked files. Review the working tree:\n{status}")
     return wheel, sdist
 
 
@@ -691,15 +675,11 @@ def _verify_public_install(
         )
         output = (completed.stdout or "").strip()
         if completed.returncode == 0 and output == context.version:
-            console.print(
-                f"[green]✓[/green] PyPI installation verified: {context.version}"
-            )
+            console.print(f"[green]✓[/green] PyPI installation verified: {context.version}")
             return
         if attempt < attempts:
             delay = min(2**attempt, 20)
-            console.print(
-                f"[yellow]PyPI has not propagated yet; retrying in {delay}s.[/yellow]"
-            )
+            console.print(f"[yellow]PyPI has not propagated yet; retrying in {delay}s.[/yellow]")
             time.sleep(delay)
     raise ReleaseError(
         "The upload completed, but the public installation could not yet be verified. "
@@ -772,10 +752,7 @@ def main(
         bool,
         typer.Option(
             "--dry-run",
-            help=(
-                "Run every release check and uv publish --dry-run without "
-                "uploading or tagging."
-            ),
+            help=("Run every release check and uv publish --dry-run without uploading or tagging."),
         ),
     ] = False,
     validate_only: Annotated[
