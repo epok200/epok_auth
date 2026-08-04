@@ -4,7 +4,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool, text
+from sqlalchemy import MetaData, pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -14,7 +14,27 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = metadata
+
+def _comparison_metadata() -> MetaData:
+    """Mirror the owned schema as PostgreSQL reflects it through search_path."""
+    comparison = MetaData()
+    for table in metadata.sorted_tables:
+        table.to_metadata(comparison, schema=None)
+    return comparison
+
+
+def _include_object(
+    _object: object,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    _compare_to: object | None,
+) -> bool:
+    """Exclude Alembic's own revision table, never application objects."""
+    return not (type_ == "table" and reflected and name == "alembic_version")
+
+
+target_metadata = _comparison_metadata()
 
 
 def run_migrations_offline() -> None:
@@ -24,7 +44,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        include_schemas=True,
+        include_schemas=False,
+        include_object=_include_object,
         version_table_schema="public",
         compare_type=True,
     )
@@ -34,7 +55,7 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     # PostgreSQL omits the schema from same-schema foreign-key reflection. Treating
-    # epok_auth as the default schema makes reflected and declarative metadata
+    # epok_auth as the default schema makes reflected and comparison metadata
     # canonical without hiding real foreign-key drift.
     #
     # Executing SET starts an implicit SQLAlchemy transaction. Commit that session
@@ -46,6 +67,7 @@ def do_run_migrations(connection: Connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         include_schemas=False,
+        include_object=_include_object,
         version_table_schema="public",
         compare_type=True,
     )
