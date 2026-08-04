@@ -163,7 +163,7 @@ jobs:
   package:
     name: package
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
@@ -178,19 +178,30 @@ jobs:
         run: |
           set -euo pipefail
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          sdist="$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)"
           test -n "$wheel"
+          test -n "$sdist"
+          test "$(find dist -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 1
           python -m zipfile -l "$wheel" | grep 'epok_auth/migrations/versions/0001_initial.py'
           python -m zipfile -l "$wheel" | grep 'epok_auth/py.typed'
-      - name: Isolated installation and public API smoke test
+          tar -tzf "$sdist" | grep 'src/epok_auth/migrations/versions/0001_initial.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/py.typed'
+      - name: Isolated wheel and sdist smoke tests
         shell: bash
         run: |
           set -euo pipefail
           expected_version="$(uv version --short)"
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          uv venv /tmp/epok-auth-smoke --python 3.12
-          uv pip install --python /tmp/epok-auth-smoke/bin/python "$wheel"
-          EPOK_AUTH_EXPECTED_VERSION="$expected_version" \
-            /tmp/epok-auth-smoke/bin/python - <<'PY'
+          sdist="$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)"
+
+          smoke_test() {
+            artifact="$1"
+            environment="$2"
+            uv venv "$environment" --python 3.12
+            uv pip install --python "$environment/bin/python" "$artifact"
+            EPOK_AUTH_EXPECTED_VERSION="$expected_version" \
+              "$environment/bin/python" - <<'PY'
           import os
           from importlib.metadata import version
 
@@ -203,8 +214,12 @@ jobs:
           assert AuthSettings is not None
           assert EpokAuth is not None
           PY
-          /tmp/epok-auth-smoke/bin/epok-auth --help
-          /tmp/epok-auth-smoke/bin/epok-auth generate-secret --bytes 32 | grep -E '.{40,}'
+            "$environment/bin/epok-auth" --help >/dev/null
+            "$environment/bin/epok-auth" generate-secret --bytes 32 | grep -E '.{40,}'
+          }
+
+          smoke_test "$wheel" /tmp/epok-auth-wheel-smoke
+          smoke_test "$sdist" /tmp/epok-auth-sdist-smoke
 
   merge-gate:
     name: merge-gate
