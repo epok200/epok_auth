@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -25,6 +26,21 @@ if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   exit 1
 fi
 
+if ! git remote get-url origin >/dev/null 2>&1; then
+  echo "An origin remote is required to verify the release commit." >&2
+  exit 1
+fi
+
+git fetch --quiet origin refs/heads/main
+REMOTE_MAIN="$(git rev-parse FETCH_HEAD)"
+LOCAL_HEAD="$(git rev-parse HEAD)"
+if [[ "$LOCAL_HEAD" != "$REMOTE_MAIN" ]]; then
+  echo "Local main must exactly match origin/main before publishing." >&2
+  echo "local:  $LOCAL_HEAD" >&2
+  echo "remote: $REMOTE_MAIN" >&2
+  exit 1
+fi
+
 if git ls-files --error-unmatch .env.secret >/dev/null 2>&1; then
   echo ".env.secret is tracked. Remove it from Git before publishing." >&2
   exit 1
@@ -35,21 +51,64 @@ if ! git check-ignore -q .env.secret; then
   exit 1
 fi
 
+load_publish_token() {
+  local line raw token=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+    if [[ "$line" =~ ^[[:space:]]*UV_PUBLISH_TOKEN[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+      if [[ -n "$token" ]]; then
+        echo ".env.secret must define UV_PUBLISH_TOKEN only once." >&2
+        exit 1
+      fi
+      raw="${BASH_REMATCH[1]}"
+      raw="${raw#"${raw%%[![:space:]]*}"}"
+      raw="${raw%"${raw##*[![:space:]]}"}"
+      if [[ "$raw" == \"*\" && "$raw" == *\" ]] || \
+         [[ "$raw" == \'*\' && "$raw" == *\' ]]; then
+        raw="${raw:1:${#raw}-2}"
+      fi
+      token="$raw"
+      continue
+    fi
+
+    echo ".env.secret accepts only UV_PUBLISH_TOKEN and comments." >&2
+    exit 1
+  done < .env.secret
+
+  if [[ -n "$token" ]]; then
+    export UV_PUBLISH_TOKEN="$token"
+  fi
+}
+
 if [[ -f .env.secret ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env.secret
-  set +a
+  load_publish_token
 fi
 
-if [[ "$MODE" == "publish" && -z "${UV_PUBLISH_TOKEN:-}" ]]; then
-  echo "UV_PUBLISH_TOKEN is required. Put it in .env.secret or export it." >&2
-  exit 1
+if [[ "$MODE" == "publish" ]]; then
+  if [[ -z "${UV_PUBLISH_TOKEN:-}" ]]; then
+    echo "UV_PUBLISH_TOKEN is required. Put it in .env.secret or export it." >&2
+    exit 1
+  fi
+  if [[ "$UV_PUBLISH_TOKEN" != pypi-* ]] || \
+     [[ "$UV_PUBLISH_TOKEN" == *"REPLACE_WITH_YOUR_TOKEN"* ]]; then
+    echo "UV_PUBLISH_TOKEN does not look like a real PyPI API token." >&2
+    exit 1
+  fi
 fi
 
 VERSION="$(uv version --short)"
 if [[ -z "$VERSION" || "$VERSION" == *"+"* ]]; then
   echo "Invalid PyPI release version: $VERSION" >&2
+  exit 1
+fi
+
+if git rev-parse --verify --quiet "refs/tags/v$VERSION" >/dev/null || \
+   git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+  echo "Tag v$VERSION already exists. PyPI releases are immutable; bump the version." >&2
   exit 1
 fi
 
@@ -65,28 +124,45 @@ uv run pytest -m "not integration" -q
 rm -rf dist
 uv build --no-sources
 
-WHEEL="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-SDIST="$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)"
-if [[ -z "$WHEEL" || -z "$SDIST" ]]; then
-  echo "Both wheel and source distribution are required." >&2
+WHEEL_COUNT="$(find dist -maxdepth 1 -name '*.whl' -print | wc -l | tr -d ' ')"
+SDIST_COUNT="$(find dist -maxdepth 1 -name '*.tar.gz' -print | wc -l | tr -d ' ')"
+if [[ "$WHEEL_COUNT" != "1" || "$SDIST_COUNT" != "1" ]]; then
+  echo "Exactly one wheel and one source distribution are required." >&2
+  find dist -maxdepth 1 -type f -print >&2
   exit 1
 fi
 
+WHEEL="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+SDIST="$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-uv venv "$TMP_DIR/venv" --python 3.12
-uv pip install --python "$TMP_DIR/venv/bin/python" "$WHEEL"
-EPOK_AUTH_EXPECTED_VERSION="$VERSION" "$TMP_DIR/venv/bin/python" - <<'PY'
+
+smoke_test_artifact() {
+  local artifact="$1"
+  local environment="$2"
+
+  uv venv "$environment" --python 3.12
+  uv pip install --python "$environment/bin/python" "$artifact"
+  EPOK_AUTH_EXPECTED_VERSION="$VERSION" "$environment/bin/python" - <<'PY'
 import os
 from importlib.metadata import version
 
 import epok_auth
+from epok_auth import AuthSettings, EpokAuth
 
 expected = os.environ["EPOK_AUTH_EXPECTED_VERSION"]
 assert version("epok-auth") == expected
 assert epok_auth.__version__ == expected
+assert AuthSettings is not None
+assert EpokAuth is not None
 PY
-"$TMP_DIR/venv/bin/epok-auth" --help >/dev/null
+  "$environment/bin/epok-auth" --help >/dev/null
+}
+
+smoke_test_artifact "$WHEEL" "$TMP_DIR/wheel-venv"
+smoke_test_artifact "$SDIST" "$TMP_DIR/sdist-venv"
+
+git diff --exit-code -- . ':!dist'
 
 PUBLISH_ARGS=(
   --publish-url https://upload.pypi.org/legacy/
