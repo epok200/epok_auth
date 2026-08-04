@@ -67,6 +67,27 @@ EPOK_AUTH_TRUSTED_ORIGINS=https://colors.example.com
 
 Production configuration is **fail-closed**: weak secrets, insecure cookies, generic issuer/audience values, missing PostgreSQL, and ambiguous origins prevent startup.
 
+## Publication
+
+The version has one source of truth in `pyproject.toml` and is exposed at runtime through `importlib.metadata`:
+
+```bash
+uv version --short
+uv version --bump beta
+uv version --bump stable
+uv version --bump patch
+```
+
+Local PyPI credentials belong in an ignored `.env.secret` file. Validate or publish only from a clean `main` checkout:
+
+```bash
+cp .env.secret.example .env.secret
+bash scripts/publish.sh --dry-run
+bash scripts/publish.sh
+```
+
+The script runs the release checks, builds with `uv build --no-sources`, installs the wheel in an isolated environment and asks for the exact version before uploading. See [docs/PUBLISHING.md](docs/PUBLISHING.md) for the complete procedure.
+
 ## Database and initial administrator
 
 ```bash
@@ -158,6 +179,14 @@ Nuxt/Nitro ── protected access/refresh ──> FastAPI + epok-auth
 
 Vue receives only safe user/session state. Access and refresh credentials remain server-side.
 
+## Documentation
+
+- [Minimal usage and test guide in Spanish](docs/USAGE_ES.md)
+- [Publishing and versioning](docs/PUBLISHING.md)
+- [Threat model](docs/THREAT_MODEL.md)
+- [Security assurance](docs/SECURITY_ASSURANCE.md)
+- [Security policy](SECURITY.md)
+
 ## Security model
 
 The beta is designed around these invariants:
@@ -169,8 +198,6 @@ The beta is designed around these invariants:
 - changing a password, disabling or locking a user revokes sessions;
 - unsafe production configuration fails before serving traffic;
 - authentication errors do not echo secrets or distinguish unknown users.
-
-Read [SECURITY.md](SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), and [docs/SECURITY_ASSURANCE.md](docs/SECURITY_ASSURANCE.md).
 
 ## Development
 
