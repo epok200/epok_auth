@@ -1,7 +1,14 @@
+from importlib.metadata import PackageNotFoundError, version
+
 from epok_auth.config import AuthSettings, Environment
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.fastapi import EpokAuth
 from epok_auth.models import Principal, UserAccount, UserStatus
+
+try:
+    __version__ = version("epok-auth")
+except PackageNotFoundError:  # pragma: no cover - direct source checkout without installation
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "AuthError",
@@ -12,6 +19,5 @@ __all__ = [
     "Principal",
     "UserAccount",
     "UserStatus",
+    "__version__",
 ]
-
-__version__ = "0.1.0b1"
