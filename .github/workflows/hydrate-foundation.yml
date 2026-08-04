@@ -1,0 +1,73 @@
+name: Hydrate validated foundation
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hydrate-epok-auth-foundation
+  cancel-in-progress: false
+
+jobs:
+  hydrate:
+    if: >-
+      github.repository == 'epok200/epok_auth' &&
+      github.head_ref == 'codex/auth-foundation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout trusted head branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: codex/auth-foundation
+          fetch-depth: 0
+
+      - name: Verify and extract validated archive
+        id: hydrate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -d .bootstrap ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Foundation already hydrated."
+            exit 0
+          fi
+
+          test -f .bootstrap/archive.part000
+          test -f .bootstrap/archive.part001
+          test "$(find .bootstrap -maxdepth 1 -name 'archive.part*' | wc -l)" -eq 2
+
+          cat .bootstrap/archive.part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
+          echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
+
+          tar -tzf /tmp/epok-auth.tar.gz > /tmp/archive-files.txt
+          test -s /tmp/archive-files.txt
+          ! grep -Eq '(^|/)\.git(/|$)' /tmp/archive-files.txt
+          ! grep -Eq '^\.github/' /tmp/archive-files.txt
+          ! grep -Eq '(^|/)\.env($|/)' /tmp/archive-files.txt
+
+          tar -xzf /tmp/epok-auth.tar.gz -C .
+          rm -rf .bootstrap
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit hydrated tree
+        if: steps.hydrate.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: hydrate validated beta foundation"
+          git push origin HEAD:codex/auth-foundation
