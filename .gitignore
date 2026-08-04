@@ -1,0 +1,43 @@
+# Local environments and secrets
+.env
+.env.*
+!.env.example
+!.env.secret.example
+.envrc
+.secrets/
+*credentials*.json
+*service-account*.json
+application_default_credentials.json
+adc.json
+token*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Python and tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.coverage
+coverage.xml
+htmlcov/
+
+# Build and local data
+dist/
+build/
+*.egg-info/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Operating systems and editors
+.DS_Store
+.idea/
+.vscode/

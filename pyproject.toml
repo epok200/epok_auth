@@ -1,0 +1,126 @@
+[project]
+name = "epok-auth"
+version = "0.1.0b1"
+description = "FastAPI-first authentication with PostgreSQL-authoritative, revocable sessions."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "EPOK" }]
+keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = [
+  "email-validator>=2.2,<3",
+  "fastapi>=0.128,<1",
+  "pydantic>=2.12,<3",
+  "pydantic-settings>=2.11,<3",
+  "pwdlib[argon2]>=0.3,<0.4",
+  "PyJWT>=2.10,<3",
+  "typer>=0.20,<1",
+]
+
+[project.optional-dependencies]
+postgres = [
+  "alembic>=1.17,<2",
+  "psycopg[binary,pool]>=3.2,<4",
+  "SQLAlchemy>=2.0.45,<2.1",
+]
+all = [
+  "alembic>=1.17,<2",
+  "psycopg[binary,pool]>=3.2,<4",
+  "SQLAlchemy>=2.0.45,<2.1",
+]
+
+[project.scripts]
+epok-auth = "epok_auth.cli:app"
+
+[project.urls]
+Documentation = "https://github.com/epok200/epok_auth/blob/main/docs/USAGE_ES.md"
+Changelog = "https://github.com/epok200/epok_auth/blob/main/CHANGELOG.md"
+Repository = "https://github.com/epok200/epok_auth"
+Issues = "https://github.com/epok200/epok_auth/issues"
+Security = "https://github.com/epok200/epok_auth/security/policy"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/epok_auth"]
+include = ["src/epok_auth/py.typed", "src/epok_auth/migrations/**/*"]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "pip-audit>=2.9,<3",
+  "pyright>=1.1.400,<2",
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.25,<2",
+  "pytest-cov>=6,<8",
+  "ruff>=0.12,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-config --strict-markers"
+asyncio_mode = "auto"
+markers = [
+  "integration: requires a disposable PostgreSQL database",
+  "security: security regression and abuse-case coverage",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["epok_auth"]
+omit = ["src/epok_auth/migrations/env.py", "src/epok_auth/migrations/versions/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+  '\.\.\.',
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["A", "ASYNC", "B", "C4", "DTZ", "E", "F", "FAST", "I", "N", "PERF", "PIE", "PL", "PTH", "RUF", "S", "SIM", "T20", "UP"]
+ignore = ["PLR0913", "PLR2004", "S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/**/*.py" = ["B008"]
+"tests/**/*.py" = ["B008", "PLC0415", "S105", "S106", "S107", "PLR2004"]
+"tests/test_postgres_integration.py" = ["E402"]
+"tests/test_tokens.py" = ["DTZ001"]
+"src/epok_auth/cli.py" = ["PLC0415", "T201"]
+"src/epok_auth/config.py" = ["PLR0912"]
+"src/epok_auth/errors.py" = ["S105"]
+"src/epok_auth/fastapi/integration.py" = ["FAST001", "PLC0415", "PLR0917"]
+"src/epok_auth/fastapi/schemas.py" = ["S105"]
+"src/epok_auth/models.py" = ["S105"]
+"src/epok_auth/passwords.py" = ["PLC0415"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src"]
+reportMissingTypeStubs = "none"

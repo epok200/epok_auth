@@ -1,0 +1,23 @@
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: github/codeql-action/init@0daab03d71ff584ef619d027a3fd9146679c5d84
+        with:
+          languages: python
+          queries: security-extended
+      - uses: github/codeql-action/analyze@0daab03d71ff584ef619d027a3fd9146679c5d84
