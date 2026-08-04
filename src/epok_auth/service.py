@@ -6,6 +6,7 @@ import secrets
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from email_validator import EmailNotValidError, validate_email
@@ -35,8 +36,8 @@ from epok_auth.passwords import PasswordManager
 from epok_auth.store import AuthStore, AuthTransaction, StoreConflictError
 from epok_auth.tokens import (
     AccessTokenSigner,
-    HMACJWTSigner,
     Clock,
+    HMACJWTSigner,
     create_csrf_token,
     create_refresh_token,
     secure_token_equals,
@@ -45,6 +46,7 @@ from epok_auth.tokens import (
 )
 
 _CAPABILITY = re.compile(r"[a-z0-9][a-z0-9:._-]{0,99}")
+_EMPTY_CONTEXT = RequestContext()
 
 
 class AuthService:
@@ -83,7 +85,7 @@ class AuthService:
         email: str,
         display_name: str,
         password: str,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> UserAccount:
         now = self._now()
         normalized_email = normalize_email(email)
@@ -136,7 +138,7 @@ class AuthService:
         display_name: str,
         roles: Sequence[str] | None = None,
         scopes: Sequence[str] = (),
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> ProvisionedUser:
         now = self._now()
         normalized_roles = normalize_capabilities(
@@ -194,7 +196,7 @@ class AuthService:
         user_id: UUID,
         update: UserUpdate,
         *,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> UserAccount:
         now = self._now()
         async with self.store.transaction() as transaction:
@@ -267,7 +269,7 @@ class AuthService:
         self,
         user_id: UUID,
         *,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> ProvisionedUser:
         now = self._now()
         temporary_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
@@ -300,7 +302,7 @@ class AuthService:
         self,
         user_id: UUID,
         *,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> int:
         now = self._now()
         async with self.store.transaction() as transaction:
@@ -322,7 +324,7 @@ class AuthService:
         email: str,
         password: str,
         *,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> SessionBundle:
         now = self._now()
         normalized_email = normalize_email_for_login(email)
@@ -435,7 +437,7 @@ class AuthService:
         csrf_header: str,
         *,
         origin: str | None = None,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> SessionBundle:
         self.validate_origin(origin)
         self.validate_csrf_pair(csrf_cookie, csrf_header)
@@ -447,9 +449,7 @@ class AuthService:
                 token_hash(refresh_token),
                 for_update=True,
             )
-            if session is None:
-                failure = invalid_session()
-            elif session.revoked_at is not None:
+            if session is None or session.revoked_at is not None:
                 failure = invalid_session()
             elif session.used_at is not None:
                 await transaction.revoke_family(session.family_id, revoked_at=now)
@@ -514,7 +514,7 @@ class AuthService:
         csrf_header: str | None,
         *,
         origin: str | None = None,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> int:
         self.validate_origin(origin)
         if not refresh_token:
@@ -547,7 +547,7 @@ class AuthService:
         current_password: str,
         new_password: str,
         *,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> SessionBundle:
         self.passwords.validate(new_password)
         now = self._now()
@@ -649,7 +649,7 @@ class AuthService:
         family_id: UUID | None = None,
         absolute_expires_at: datetime | None = None,
         authenticated_at: datetime | None = None,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
     ) -> SessionBundle:
         session_id = uuid4()
         family_id = family_id or uuid4()
@@ -717,7 +717,7 @@ class AuthService:
         now: datetime,
         user_id: UUID | None = None,
         session_id: UUID | None = None,
-        context: RequestContext = RequestContext(),
+        context: RequestContext = _EMPTY_CONTEXT,
         metadata: dict[str, str | int | bool | None] | None = None,
     ) -> None:
         await transaction.add_security_event(
@@ -781,8 +781,6 @@ def normalize_capabilities(values: Sequence[str], *, maximum: int) -> tuple[str,
 
 
 def canonical_origin(origin: str) -> str:
-    from urllib.parse import urlsplit
-
     try:
         parsed = urlsplit(origin.strip().rstrip("/"))
         host = (parsed.hostname or "").casefold()

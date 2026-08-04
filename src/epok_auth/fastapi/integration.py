@@ -21,9 +21,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from epok_auth.config import AuthSettings
 from epok_auth.errors import AuthError, AuthErrorCode
-from epok_auth.models import Principal, RequestContext, UserUpdate
-from epok_auth.service import AuthService
-from epok_auth.store import AuthStore
 from epok_auth.fastapi.schemas import (
     ChangePasswordRequest,
     CreateUserRequest,
@@ -37,6 +34,9 @@ from epok_auth.fastapi.schemas import (
     UserListResponse,
     UserResponse,
 )
+from epok_auth.models import Principal, RequestContext, UserUpdate
+from epok_auth.service import AuthService
+from epok_auth.store import AuthStore
 
 PrincipalDependency = Principal
 SafeAuthRoute = APIRoute

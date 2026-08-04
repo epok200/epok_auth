@@ -76,6 +76,6 @@ def test_very_large_login_input_is_rejected_without_expensive_hashing() -> None:
     before = fake.verify_calls
     result = manager.verify_for_login("x" * 5000, None)
     assert result.valid is False
-    # The implementation may perform one bounded dummy verification, but never hashes the huge input.
+    # A bounded dummy verification is allowed, but the huge input is never hashed.
     assert fake.hash_calls == 1
     assert fake.verify_calls - before <= 1
