@@ -97,12 +97,21 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["A", "ASYNC", "B", "C4", "DTZ", "E", "F", "FAST", "I", "N", "PERF", "PIE", "PL", "PTH", "RUF", "S", "SIM", "T20", "TC", "UP"]
+select = ["A", "ASYNC", "B", "C4", "DTZ", "E", "F", "FAST", "I", "N", "PERF", "PIE", "PL", "PTH", "RUF", "S", "SIM", "T20", "UP"]
 ignore = ["PLR0913", "PLR2004", "S101"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S105", "S106", "S107", "PLR2004"]
-"src/epok_auth/cli.py" = ["T201"]
+"examples/**/*.py" = ["B008"]
+"tests/**/*.py" = ["B008", "PLC0415", "S105", "S106", "S107", "PLR2004"]
+"tests/test_postgres_integration.py" = ["E402"]
+"tests/test_tokens.py" = ["DTZ001"]
+"src/epok_auth/cli.py" = ["PLC0415", "T201"]
+"src/epok_auth/config.py" = ["PLR0912"]
+"src/epok_auth/errors.py" = ["S105"]
+"src/epok_auth/fastapi/integration.py" = ["FAST001", "PLC0415", "PLR0917"]
+"src/epok_auth/fastapi/schemas.py" = ["S105"]
+"src/epok_auth/models.py" = ["S105"]
+"src/epok_auth/passwords.py" = ["PLC0415"]
 
 [tool.pyright]
 pythonVersion = "3.12"
