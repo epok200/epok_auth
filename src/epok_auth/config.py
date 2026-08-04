@@ -195,6 +195,8 @@ class AuthSettings(BaseSettings):
                 raise ValueError("production requires __Host- cookie names")
             if not self.require_origin or not self.trusted_origins:
                 raise ValueError("production requires explicit Origin validation")
+            if any(urlsplit(origin).scheme != "https" for origin in self.trusted_origins):
+                raise ValueError("production trusted origins must use HTTPS")
             if self.password_min_length < 15:
                 raise ValueError("production password minimum must be at least 15 characters")
         return self
