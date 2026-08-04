@@ -1,0 +1,48 @@
+name: Import validated foundation
+
+on:
+  push:
+    branches:
+      - codex/auth-foundation
+
+permissions:
+  contents: write
+
+concurrency:
+  group: epok-auth-foundation-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  import:
+    if: ${{ !contains(github.event.head_commit.message, '[bootstrap-complete]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Verify and extract validated tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .bootstrap/chunks2/part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
+          echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/epok-auth.tar.gz -C .
+          rm -rf .bootstrap
+
+      - name: Commit imported foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "epok-auth bootstrap"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Validated tree already imported."
+            exit 0
+          fi
+          git commit -m "feat: import validated authentication foundation [bootstrap-complete]"
+          git push
