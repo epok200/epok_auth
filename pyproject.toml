@@ -25,6 +25,7 @@ dependencies = [
   "pydantic-settings>=2.14,<3",
   "pwdlib[argon2]>=0.3,<0.4",
   "PyJWT>=2.13,<3",
+  "typer>=0.26,<1",
 ]
 
 [project.optional-dependencies]
@@ -33,14 +34,12 @@ postgres = [
   "psycopg[binary,pool]>=3.3,<4",
   "SQLAlchemy>=2.0.51,<2.2",
 ]
-cli = ["typer>=0.26,<1"]
 redis = ["redis>=6.4,<7"]
 all = [
   "alembic>=1.18,<2",
   "psycopg[binary,pool]>=3.3,<4",
   "redis>=6.4,<7",
   "SQLAlchemy>=2.0.51,<2.2",
-  "typer>=0.26,<1",
 ]
 
 [project.scripts]
