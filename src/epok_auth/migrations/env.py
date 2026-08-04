@@ -4,28 +4,17 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from epok_auth.postgres.tables import metadata
+from epok_auth.postgres.tables import SCHEMA, metadata
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = metadata
-
-
-def _include_object(
-    _object: object,
-    name: str | None,
-    type_: str,
-    reflected: bool,
-    _compare_to: object | None,
-) -> bool:
-    """Exclude Alembic's control table without hiding application schema drift."""
-    return not (type_ == "table" and reflected and name == "alembic_version")
 
 
 def run_migrations_offline() -> None:
@@ -36,7 +25,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
-        include_object=_include_object,
+        version_table_schema="public",
         compare_type=True,
     )
     with context.begin_transaction():
@@ -44,11 +33,16 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # PostgreSQL omits the schema from same-schema foreign-key reflection. Treating
+    # epok_auth as the default schema makes reflected and declarative metadata
+    # canonical without hiding real foreign-key drift.
+    connection.execute(text(f'SET search_path TO "{SCHEMA}", public'))
+    connection.dialect.default_schema_name = SCHEMA
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        include_schemas=True,
-        include_object=_include_object,
+        include_schemas=False,
+        version_table_schema="public",
         compare_type=True,
     )
     with context.begin_transaction():
