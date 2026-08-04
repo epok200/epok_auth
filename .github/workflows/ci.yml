@@ -33,6 +33,11 @@ jobs:
         run: |
           test -f uv.lock
           uv lock --check
+      - name: Validate release safeguards
+        run: |
+          git check-ignore -q .env.secret
+          ! git ls-files --error-unmatch .env.secret 2>/dev/null
+          bash -n scripts/publish.sh
       - name: Install all dependencies
         run: uv sync --locked --all-extras --group dev --python 3.12
       - name: Formatting
@@ -166,8 +171,8 @@ jobs:
           version: "0.12.1"
           enable-cache: true
       - run: uv python install 3.12
-      - name: Build wheel and source distribution
-        run: uv build
+      - name: Build wheel and source distribution without local sources
+        run: uv build --no-sources
       - name: Verify packaged files
         shell: bash
         run: |
@@ -180,14 +185,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          expected_version="$(uv version --short)"
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
           uv venv /tmp/epok-auth-smoke --python 3.12
           uv pip install --python /tmp/epok-auth-smoke/bin/python "$wheel"
-          /tmp/epok-auth-smoke/bin/python - <<'PY'
+          EPOK_AUTH_EXPECTED_VERSION="$expected_version" \
+            /tmp/epok-auth-smoke/bin/python - <<'PY'
+          import os
+          from importlib.metadata import version
+
           import epok_auth
           from epok_auth import AuthSettings, EpokAuth
 
-          assert epok_auth.__version__ == "0.1.0b1"
+          expected = os.environ["EPOK_AUTH_EXPECTED_VERSION"]
+          assert version("epok-auth") == expected
+          assert epok_auth.__version__ == expected
           assert AuthSettings is not None
           assert EpokAuth is not None
           PY
