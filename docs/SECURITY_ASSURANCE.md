@@ -6,10 +6,11 @@ This document maps beta capabilities to executable evidence. It is not a claim t
 
 The `0.1.0b1` candidate is accepted by the standalone library gate only after all of the following complete successfully on a clean GitHub runner:
 
-- 101 tests pass, including PostgreSQL integration and concurrency cases;
-- branch-aware coverage reaches 94.80%;
+- 102 tests pass, including PostgreSQL integration and concurrency cases;
+- branch-aware coverage remains above 90%;
 - the non-integration suite passes on Python 3.12, 3.13 and 3.14;
 - PostgreSQL 17 migrates from an empty database and Alembic reports no metadata drift;
+- package migrations coexist with an independent host `public.alembic_version` history;
 - Ruff formatting, lint and security rules pass;
 - Pyright strict passes for production source;
 - `pip-audit` reports no known vulnerable installed dependency;
@@ -36,6 +37,7 @@ The `0.1.0b1` candidate is accepted by the standalone library gate only after al
 | Secret redaction | Validation and auth responses do not echo submitted secrets | HTTP and CLI tests |
 | Configuration | Production rejects weak secrets, insecure cookies and ambiguous origins | `test_config.py` |
 | Migration safety | Empty-database migration commits and schema metadata remains drift-free | PostgreSQL 17 job and `test_migrate.py` |
+| Host migration isolation | The host's `public.alembic_version` remains untouched and epok-auth uses `public.epok_auth_alembic_version` | PostgreSQL integration fixture |
 | Packaging | Built wheel imports and exposes CLI in an isolated environment | GitHub Actions package job |
 | Compatibility | Core suite passes Python 3.12, 3.13 and 3.14 | GitHub Actions matrix |
 | Persistence | Migrations, drift check and concurrency run against PostgreSQL 17 | GitHub Actions PostgreSQL job |
