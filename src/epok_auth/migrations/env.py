@@ -19,7 +19,9 @@ def _comparison_metadata() -> MetaData:
     """Mirror the owned schema as PostgreSQL reflects it through search_path."""
     comparison = MetaData()
     for table in metadata.sorted_tables:
-        table.to_metadata(comparison, schema=None)
+        # SQLAlchemy accepts None to clear a schema during cloning; its current
+        # type signature exposes only str and RETAIN_SCHEMA.
+        table.to_metadata(comparison, schema=None)  # pyright: ignore[reportArgumentType]
     return comparison
 
 
