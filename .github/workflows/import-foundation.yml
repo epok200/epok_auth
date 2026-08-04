@@ -22,8 +22,7 @@ jobs:
     if: >-
       github.repository == 'epok200/epok_auth' &&
       github.event.pull_request.head.repo.full_name == 'epok200/epok_auth' &&
-      github.event.pull_request.head.ref == 'codex/auth-foundation' &&
-      !contains(github.event.pull_request.head.sha, '[bootstrap-complete]')
+      github.event.pull_request.head.ref == 'codex/auth-foundation'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -39,7 +38,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -d .bootstrap/chunks2
+          if [ ! -d .bootstrap/chunks2 ]; then
+            echo "Validated tree already imported."
+            exit 0
+          fi
           test "$(find .bootstrap/chunks2 -maxdepth 1 -name 'part*' | wc -l)" -eq 35
           cat .bootstrap/chunks2/part* | tr -d '\n' | base64 --decode > /tmp/epok-auth.tar.gz
           echo "a9493db0544d9932e158634c50d7b247c6fbee3e98050feb189f829bac9b5521  /tmp/epok-auth.tar.gz" | sha256sum -c -
