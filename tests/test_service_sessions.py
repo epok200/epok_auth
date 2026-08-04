@@ -175,7 +175,9 @@ async def test_concurrent_refresh_has_strict_fail_closed_semantics(service: Auth
 
 
 @pytest.mark.asyncio
-async def test_refresh_rejects_csrf_and_origin_without_consuming_token(service: AuthService) -> None:
+async def test_refresh_rejects_csrf_and_origin_without_consuming_token(
+    service: AuthService,
+) -> None:
     first = await create_admin_and_login(service)
     for cookie, header, origin, expected in (
         (first.csrf_token, "wrong", "http://localhost:3000", AuthErrorCode.INVALID_CSRF),
@@ -293,7 +295,9 @@ async def test_change_password_revokes_old_family_and_starts_fresh_session(
         await service.authenticate(old.access_token)
     with pytest.raises(AuthError):
         await service.login(ADMIN_EMAIL, ADMIN_PASSWORD)
-    assert (await service.login(ADMIN_EMAIL, NEW_PASSWORD)).principal.user_id == old.principal.user_id
+    assert (
+        await service.login(ADMIN_EMAIL, NEW_PASSWORD)
+    ).principal.user_id == old.principal.user_id
 
 
 @pytest.mark.asyncio

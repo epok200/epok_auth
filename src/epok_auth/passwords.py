@@ -37,7 +37,9 @@ class _Argon2Fallback:
             valid = self._hasher.verify(encoded_hash, password)
         except (InvalidHashError, VerificationError, VerifyMismatchError):
             return False, None
-        updated = self.hash(password) if valid and self._hasher.check_needs_rehash(encoded_hash) else None
+        updated = (
+            self.hash(password) if valid and self._hasher.check_needs_rehash(encoded_hash) else None
+        )
         return bool(valid), updated
 
 

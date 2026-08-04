@@ -55,7 +55,9 @@ def test_issue_and_verify_strict_access_token() -> None:
     assert claims.family_id == subject.family_id
     assert claims.authenticated_at == subject.authenticated_at
     assert expires_at == NOW + timedelta(seconds=300)
-    payload = jwt.decode(token, SECRET, algorithms=["HS256"], options={"verify_aud": False, "verify_exp": False})
+    payload = jwt.decode(
+        token, SECRET, algorithms=["HS256"], options={"verify_aud": False, "verify_exp": False}
+    )
     assert payload["type"] == "access"
     assert payload["iss"] == "tests"
     assert payload["aud"] == "tests-api"

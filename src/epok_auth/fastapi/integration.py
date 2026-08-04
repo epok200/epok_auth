@@ -1,4 +1,3 @@
-
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Self
@@ -187,7 +186,9 @@ class EpokAuth:
             return response
 
         @router.get("/me", response_model=PrincipalResponse)
-        async def me(principal: Annotated[Principal, Depends(self.current_user)]) -> PrincipalResponse:
+        async def me(
+            principal: Annotated[Principal, Depends(self.current_user)],
+        ) -> PrincipalResponse:
             return PrincipalResponse.from_principal(principal)
 
         @router.post("/change-password", response_model=SessionResponse)

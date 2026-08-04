@@ -8,7 +8,12 @@ import pytest
 
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.models import RequestContext, SecurityEventType, UserStatus, UserUpdate
-from epok_auth.service import AuthService, normalize_capabilities, normalize_display_name, normalize_email
+from epok_auth.service import (
+    AuthService,
+    normalize_capabilities,
+    normalize_display_name,
+    normalize_email,
+)
 from epok_auth.testing import MemoryAuthStore
 from tests.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, USER_EMAIL
 
@@ -187,11 +192,15 @@ async def test_password_reset_revokes_sessions_and_returns_secret_once(
         await service.authenticate(bundle.access_token)
     with pytest.raises(AuthError):
         await service.login(USER_EMAIL, result.temporary_password)
-    assert (await service.login(USER_EMAIL, reset.temporary_password)).principal.user_id == result.user.id
+    assert (
+        await service.login(USER_EMAIL, reset.temporary_password)
+    ).principal.user_id == result.user.id
 
 
 @pytest.mark.asyncio
-async def test_manual_session_revocation_is_audited(service: AuthService, store: MemoryAuthStore) -> None:
+async def test_manual_session_revocation_is_audited(
+    service: AuthService, store: MemoryAuthStore
+) -> None:
     admin = await service.create_admin(
         email=ADMIN_EMAIL,
         display_name="Admin",

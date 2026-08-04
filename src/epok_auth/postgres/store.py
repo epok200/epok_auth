@@ -65,8 +65,10 @@ class PostgresAuthTransaction:
         )
 
     async def count_users_with_role(self, role: str, *, active_only: bool) -> int:
-        statement = select(func.count()).select_from(user_account).where(
-            user_account.c.roles.contains([role])
+        statement = (
+            select(func.count())
+            .select_from(user_account)
+            .where(user_account.c.roles.contains([role]))
         )
         if active_only:
             statement = statement.where(user_account.c.status == UserStatus.ACTIVE.value)
@@ -116,9 +118,7 @@ class PostgresAuthTransaction:
     async def update_user(self, user: UserAccount) -> None:
         try:
             result = await self.connection.execute(
-                update(user_account)
-                .where(user_account.c.id == user.id)
-                .values(_user_values(user))
+                update(user_account).where(user_account.c.id == user.id).values(_user_values(user))
             )
         except IntegrityError as error:
             raise StoreConflictError("user uniqueness constraint failed") from error

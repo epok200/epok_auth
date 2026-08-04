@@ -119,9 +119,7 @@ async def test_postgres_adapter_supports_complete_user_and_session_flow(
     assert await service.revoke_user_sessions(admin.id) >= 1
 
     with psycopg.connect(sync_url(database_url)) as connection:
-        user_count = connection.execute(
-            "SELECT count(*) FROM epok_auth.user_account"
-        ).fetchone()[0]
+        user_count = connection.execute("SELECT count(*) FROM epok_auth.user_account").fetchone()[0]
         session_count = connection.execute(
             "SELECT count(*) FROM epok_auth.refresh_session"
         ).fetchone()[0]

@@ -96,7 +96,11 @@ class _MemoryTransaction:
     ) -> RefreshSession | None:
         del for_update
         return next(
-            (session for session in self.store.sessions.values() if session.token_hash == token_hash),
+            (
+                session
+                for session in self.store.sessions.values()
+                if session.token_hash == token_hash
+            ),
             None,
         )
 

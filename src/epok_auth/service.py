@@ -223,10 +223,14 @@ class AuthService:
                 and self.settings.admin_role in current.roles
                 and (status is not UserStatus.ACTIVE or self.settings.admin_role not in roles)
             )
-            if loses_active_admin and await transaction.count_users_with_role(
-                self.settings.admin_role,
-                active_only=True,
-            ) <= 1:
+            if (
+                loses_active_admin
+                and await transaction.count_users_with_role(
+                    self.settings.admin_role,
+                    active_only=True,
+                )
+                <= 1
+            ):
                 raise AuthError(
                     AuthErrorCode.LAST_ADMIN_REQUIRED,
                     "At least one active administrator is required.",
@@ -337,11 +341,15 @@ class AuthService:
                 or bool(user.locked_until and user.locked_until > now)
             )
             if unavailable or not verification.valid:
-                if user is not None and user.status is UserStatus.ACTIVE and not (
-                    user.locked_until and user.locked_until > now
+                if (
+                    user is not None
+                    and user.status is UserStatus.ACTIVE
+                    and not (user.locked_until and user.locked_until > now)
                 ):
                     previous_attempts = (
-                        0 if user.locked_until and user.locked_until <= now else user.failed_login_attempts
+                        0
+                        if user.locked_until and user.locked_until <= now
+                        else user.failed_login_attempts
                     )
                     attempts = previous_attempts + 1
                     locked_until = (
@@ -736,7 +744,9 @@ def normalize_email(value: str) -> str:
     try:
         normalized = validate_email(value.strip(), check_deliverability=False).normalized
     except EmailNotValidError as error:
-        raise AuthError(AuthErrorCode.INPUT_INVALID, "Email is not valid.", status_code=422) from error
+        raise AuthError(
+            AuthErrorCode.INPUT_INVALID, "Email is not valid.", status_code=422
+        ) from error
     return normalized.casefold()
 
 
@@ -759,10 +769,14 @@ def normalize_capabilities(values: Sequence[str], *, maximum: int) -> tuple[str,
     if len(values) > maximum:
         raise AuthError(AuthErrorCode.INPUT_INVALID, "Too many capabilities.", status_code=422)
     if any(not value.strip() for value in values):
-        raise AuthError(AuthErrorCode.INPUT_INVALID, "Capability syntax is not valid.", status_code=422)
+        raise AuthError(
+            AuthErrorCode.INPUT_INVALID, "Capability syntax is not valid.", status_code=422
+        )
     normalized = tuple(sorted({value.strip().casefold() for value in values}))
     if any(_CAPABILITY.fullmatch(value) is None for value in normalized):
-        raise AuthError(AuthErrorCode.INPUT_INVALID, "Capability syntax is not valid.", status_code=422)
+        raise AuthError(
+            AuthErrorCode.INPUT_INVALID, "Capability syntax is not valid.", status_code=422
+        )
     return normalized
 
 

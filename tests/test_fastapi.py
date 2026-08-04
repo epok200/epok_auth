@@ -190,7 +190,9 @@ async def test_refresh_and_logout_require_csrf_and_trusted_origin(settings: Auth
 
 
 @pytest.mark.asyncio
-async def test_must_change_password_can_use_me_and_change_password_only(settings: AuthSettings) -> None:
+async def test_must_change_password_can_use_me_and_change_password_only(
+    settings: AuthSettings,
+) -> None:
     auth, client = await client_for(settings=settings)
     provisioned = await auth.service.create_user(email="new@example.com", display_name="New")
     async with client:
