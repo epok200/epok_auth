@@ -36,6 +36,10 @@ build/
 *.sqlite3
 *.db
 *.log
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
 
 # Operating systems and editors
 .DS_Store
