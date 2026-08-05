@@ -35,11 +35,13 @@ dependencies = [
 [project.optional-dependencies]
 postgres = [
   "alembic>=1.17,<2",
+  "greenlet>=3.0,<4",
   "psycopg[binary,pool]>=3.2,<4",
   "SQLAlchemy>=2.0.45,<2.1",
 ]
 all = [
   "alembic>=1.17,<2",
+  "greenlet>=3.0,<4",
   "psycopg[binary,pool]>=3.2,<4",
   "SQLAlchemy>=2.0.45,<2.1",
 ]
