@@ -1,6 +1,6 @@
 [project]
 name = "epok-auth"
-version = "0.1.0b1"
+version = "0.1.0"
 description = "FastAPI-first authentication with PostgreSQL-authoritative, revocable sessions."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -403,7 +403,7 @@ wheels = [
 
 [[package]]
 name = "epok-auth"
-version = "0.1.0b1"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "email-validator" },
