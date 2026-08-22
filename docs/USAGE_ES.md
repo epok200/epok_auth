@@ -1,6 +1,6 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie pública del candidato `epok-auth 0.2.0` con lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar cada operación disponible.
+Esta guía documenta la superficie pública de `epok-auth 0.2.1` con lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar cada operación disponible.
 
 La ruta recomendada para la primera prueba es usar `AuthSettings`, `EpokAuth.postgres()` y `auth.install()`. Los helpers internos y las clases de persistencia no son necesarios para validar la beta.
 

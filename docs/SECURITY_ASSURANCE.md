@@ -4,11 +4,11 @@ This document maps beta capabilities to executable evidence. It is not a claim t
 
 ## Candidate evidence snapshot
 
-The `0.2.0` candidate is accepted by the standalone library gate only after all of the following complete successfully on a clean GitHub runner:
+The `0.2.1` release is accepted by the standalone library gate only after all of the following complete successfully on a clean GitHub runner:
 
-- 189 tests pass, including PostgreSQL integration and concurrency cases;
+- 205 tests pass, including PostgreSQL integration and concurrency cases;
 - the browser reference client passes a Node unit proof and a real Chromium flow;
-- branch-aware coverage reaches 94.61%;
+- branch-aware coverage reaches 94.53%;
 - the non-integration suite passes on Python 3.12, 3.13 and 3.14;
 - PostgreSQL 17 migrates from an empty database and Alembic reports no metadata drift;
 - Ruff formatting, lint and security rules pass;

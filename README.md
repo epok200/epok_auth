@@ -4,18 +4,18 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-> **Status:** `0.2.0` release candidate in this repository. `0.1.0` is the latest published version and does not include passkeys. Publication and product rollout remain separate approvals. Public APIs may still change before `1.0`.
+> **Status:** the `0.2` series is a public beta on PyPI with WebAuthn passkeys; this source tree builds `0.2.1`. Library publication and product rollout remain separate approvals. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
 ## Validated beta gate
 
-The clean beta tree is continuously validated by GitHub Actions. The current candidate has passed:
+The clean beta tree is continuously validated by GitHub Actions. The current release has passed:
 
 | Gate | Evidence |
 |---|---|
-| Functional and adversarial tests | 189/189 passing, plus two browser client proofs |
-| Branch coverage | 94.61% |
+| Functional and adversarial tests | 205/205 passing, plus two browser client proofs |
+| Branch coverage | 94.53% |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |
@@ -46,11 +46,8 @@ Google OIDC, TOTP/MFA, Redis coordination, multi-tenancy and service-to-service 
 ## Installation
 
 ```bash
-uv add "epok-auth[postgres,passkeys]==0.2.0"
+uv add "epok-auth[postgres,passkeys]==0.2.1"
 ```
-
-The command above applies after `0.2.0` is published. During source review, install the
-built wheel or source distribution produced by `uv build --no-sources`.
 
 Generate a secret and configure the application:
 

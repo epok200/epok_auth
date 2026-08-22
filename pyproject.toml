@@ -1,6 +1,6 @@
 [project]
 name = "epok-auth"
-version = "0.2.0"
+version = "0.2.1"
 description = "FastAPI authentication with revocable PostgreSQL sessions and WebAuthn passkeys."
 readme = "README.md"
 requires-python = ">=3.12"

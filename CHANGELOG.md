@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.2.1 - 2026-08-21
+
+- correct the public release status, installation command and validation evidence;
+- preserve the tested `0.2.0` runtime without functional changes.
+
+## 0.2.0 - 2026-08-21
 
 - add optional WebAuthn passkeys through the maintained `webauthn` adapter;
 - add discoverable passkey registration, authentication, listing and revocation APIs;

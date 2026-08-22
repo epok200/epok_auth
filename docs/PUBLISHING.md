@@ -34,7 +34,7 @@ La versión se declara una sola vez en `pyproject.toml`:
 
 ```toml
 [project]
-version = "0.2.0"
+version = "0.2.1"
 ```
 
 `epok_auth.__version__` se obtiene mediante `importlib.metadata`, así que no existe una segunda constante que mantener.
@@ -180,18 +180,18 @@ Hatchling agrega obligatoriamente una copia del `.gitignore` raíz al sdist para
 
 El contenedor PostgreSQL se elimina en un bloque de limpieza aunque una prueba falle o el proceso sea interrumpido.
 
-## Candidato actual
+## Serie publicada
 
-`0.1.0` ya fue publicado y tiene el tag `v0.1.0`. Passkeys es una feature pública
-compatible, por lo que el candidato correcto es `0.2.0`. Después de integrar el cambio
-en un `main` limpio y con CI verde, valida con:
+`0.2.0` introdujo passkeys y tiene el tag `v0.2.0`. `0.2.1` es el patch de metadata
+correspondiente, sin cambios funcionales. Cada release se valida desde un `main` limpio
+y con CI verde mediante:
 
 ```bash
 uv run scripts/publish.py --validate-only
 ```
 
-No intentes volver a publicar `0.1.0`: las versiones de PyPI son inmutables. Para
-publicar `0.2.0`, ejecuta después:
+No intentes volver a publicar una versión existente: las versiones de PyPI son
+inmutables. Para una versión nueva, ejecuta después:
 
 ```bash
 uv run scripts/publish.py --dry-run
