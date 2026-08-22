@@ -1,7 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - Unreleased
 
+- add optional WebAuthn passkeys through the maintained `webauthn` adapter;
+- add discoverable passkey registration, authentication, listing and revocation APIs;
+- persist single-use challenges and multiple credentials through a reversible PostgreSQL migration;
+- issue the same authoritative session contract from password and passkey authentication;
+- test real ES256 WebAuthn ceremonies, HTTP flows, replay defenses and PostgreSQL concurrency;
+- package and smoke-test both the base install and the optional `passkeys` extra;
+- split the authentication service by responsibility and centralize session issuance;
+- centralize typed authentication errors with safe logging and HTTP translation;
+- preserve legacy error imports and per-error HTTP overrides through the pre-1.0 transition;
 - replace the duplicated shell release implementation with a Rich/Typer Python orchestrator;
 - run the release CLI through isolated PEP 723 dependencies;
 - validate Python 3.12, 3.13 and 3.14 locally without replacing the project `.venv`;
@@ -11,7 +20,12 @@
 - add regression tests for `.env.secret` parsing and Docker port discovery;
 - retain `scripts/publish.sh` as a compatibility alias.
 
-## 0.1.0b1 — 2026-08-04
+## 0.1.0 - 2026-08-05
+
+Promoted the validated local-authentication foundation from beta to the first stable
+package release. Passkeys are not included in this version.
+
+## 0.1.0b1 - 2026-08-04
 
 First public beta and production-candidate foundation for the Colors integration:
 

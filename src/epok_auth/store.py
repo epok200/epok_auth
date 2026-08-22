@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime

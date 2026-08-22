@@ -22,6 +22,7 @@ La máquina de publicación necesita:
 Git
 uv
 Docker en ejecución
+Node.js y npm
 acceso a GitHub y PyPI
 ```
 
@@ -33,7 +34,7 @@ La versión se declara una sola vez en `pyproject.toml`:
 
 ```toml
 [project]
-version = "0.1.0b1"
+version = "0.2.0"
 ```
 
 `epok_auth.__version__` se obtiene mediante `importlib.metadata`, así que no existe una segunda constante que mantener.
@@ -48,30 +49,27 @@ No muestra la versión instalada de `uv`; para eso se utiliza `uv --version`.
 
 ## Cambiar la versión
 
-Siguiente beta:
+Una feature pública compatible avanza la versión minor:
 
 ```bash
-uv version --bump beta
+uv version --bump minor
 ```
 
 ```text
-0.1.0b1 -> 0.1.0b2
+0.1.0 -> 0.2.0
 ```
 
-Cerrar la prerelease como estable:
-
-```bash
-uv version --bump stable
-```
-
-```text
-0.1.0b2 -> 0.1.0
-```
-
-Siguiente patch estable:
+Un fix compatible avanza la versión patch:
 
 ```bash
 uv version --bump patch
+```
+
+Si se aprueba una prerelease, usa el bump beta y luego stable al cerrarla:
+
+```bash
+uv version --bump beta
+uv version --bump stable
 ```
 
 Después de cambiar la versión:
@@ -112,7 +110,7 @@ Después de crear el proyecto en PyPI, utiliza preferentemente un token limitado
 uv run scripts/publish.py --validate-only
 ```
 
-Ejecuta toda la validación local, el build y los smoke tests, pero no consulta ni modifica PyPI y no crea tags. Es el modo adecuado para volver a probar una versión que ya fue publicada, como `0.1.0b1`.
+Ejecuta toda la validación local, el build y los smoke tests, pero no consulta ni modifica PyPI y no crea tags.
 
 ### Simular una release nueva
 
@@ -150,6 +148,7 @@ Ruff format
 Ruff lint y reglas de seguridad
 Pyright estricto
 compileall
+prueba Node del cliente WebAuthn de navegador
 pip-audit
 suite no integrada en Python 3.12
 suite no integrada en Python 3.13
@@ -161,8 +160,11 @@ pruebas PostgreSQL y de concurrencia
 cobertura branch-aware mínima de 90%
 uv build --no-sources
 exactamente un wheel y un sdist
+contenido limitado al paquete público y su metadata
 instalación aislada del wheel
 instalación aislada del sdist
+instalación base sin WebAuthn y error opcional accionable
+instalación aislada del extra passkeys para wheel y sdist
 versión runtime igual a la metadata
 smoke test del CLI
 uv publish --dry-run
@@ -174,28 +176,22 @@ instalación pública desde PyPI con reintentos
 
 Los comandos de proyecto se ejecutan con `uv run --isolated`, por lo que la validación no cambia el `.venv` que utiliza el desarrollador.
 
+Hatchling agrega obligatoriamente una copia del `.gitignore` raíz al sdist para que una reconstrucción recursiva conserve la misma selección de archivos. La compuerta permite únicamente esa copia, que contiene patrones y no secretos; cualquier copia anidada se rechaza.
+
 El contenedor PostgreSQL se elimina en un bloque de limpieza aunque una prueba falle o el proceso sea interrumpido.
 
-## Primera ejecución después de esta mejora
+## Candidato actual
 
-`0.1.0b1` ya fue publicada y tiene el tag `v0.1.0b1`. Por tanto, para comprobar ahora el pipeline utiliza:
+`0.1.0` ya fue publicado y tiene el tag `v0.1.0`. Passkeys es una feature pública
+compatible, por lo que el candidato correcto es `0.2.0`. Después de integrar el cambio
+en un `main` limpio y con CI verde, valida con:
 
 ```bash
 uv run scripts/publish.py --validate-only
 ```
 
-No intentes volver a publicar `0.1.0b1`: las versiones de PyPI son inmutables.
-
-Para una futura beta:
-
-```bash
-uv version --bump beta
-git add pyproject.toml uv.lock
-git commit -m "chore: bump epok-auth to $(uv version --short)"
-git push origin main
-```
-
-Después:
+No intentes volver a publicar `0.1.0`: las versiones de PyPI son inmutables. Para
+publicar `0.2.0`, ejecuta después:
 
 ```bash
 uv run scripts/publish.py --dry-run
@@ -211,7 +207,7 @@ VERSION="$(uv version --short)"
 uv run \
   --no-project \
   --refresh-package epok-auth \
-  --with "epok-auth[postgres]==$VERSION" \
+  --with "epok-auth[postgres,passkeys]==$VERSION" \
   -- python -c 'import epok_auth; print(epok_auth.__version__)'
 ```
 
@@ -222,23 +218,3 @@ git push origin "v$(uv version --short)"
 ```
 
 Nunca reutilices el mismo número para artefactos diferentes.
-
-## Cerrar `0.1.0`
-
-Después de validar la beta dentro de Colors:
-
-```bash
-git checkout main
-git pull --ff-only
-uv version --bump stable
-git add pyproject.toml uv.lock
-git commit -m "chore: release epok-auth 0.1.0"
-git push origin main
-```
-
-Con CI y CodeQL verdes:
-
-```bash
-uv run scripts/publish.py --dry-run
-uv run scripts/publish.py
-```

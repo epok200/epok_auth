@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
@@ -10,15 +8,20 @@ psycopg = pytest.importorskip("psycopg")
 
 from epok_auth.config import AuthSettings, Environment
 from epok_auth.errors import AuthError, AuthErrorCode
-from epok_auth.migrate import check_database, upgrade_database
+from epok_auth.migrate import check_database, downgrade_database, upgrade_database
 from epok_auth.models import UserUpdate
+from epok_auth.passkeys.service import PasskeyService
+from epok_auth.passkeys.webauthn import WebAuthnAdapter
 from epok_auth.postgres import PostgresAuthStore
 from epok_auth.service import AuthService
+from tests.passkeys.virtual_authenticator import VirtualAuthenticator, decode_base64url
 
 pytestmark = pytest.mark.integration
 
 ADMIN_PASSWORD = "postgres integration protects private colors"
 DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+ORIGIN = "http://localhost:3000"
+RP_ID = "localhost"
 
 
 def sync_url(url: str) -> str:
@@ -40,6 +43,8 @@ def reset_database(database_url: str) -> Iterator[None]:
         connection.execute(
             """
             TRUNCATE epok_auth.security_event,
+                     epok_auth.passkey_challenge,
+                     epok_auth.passkey_credential,
                      epok_auth.refresh_session,
                      epok_auth.user_account
             RESTART IDENTITY CASCADE
@@ -63,7 +68,9 @@ def settings(database_url: str) -> AuthSettings:
         lockout_seconds=60,
         secure_cookies=False,
         cookie_use_host_prefix=False,
-        trusted_origins=("http://localhost:3000",),
+        trusted_origins=(ORIGIN,),
+        passkey_rp_id=RP_ID,
+        passkey_rp_name="EPOK PostgreSQL tests",
     )
 
 
@@ -211,3 +218,155 @@ async def test_initial_admin_creation_is_serialized_across_connections(
 
     assert outcomes.count("created") == 1
     assert outcomes.count(AuthErrorCode.ADMIN_EXISTS.value) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_passkey_flow_is_persisted_and_challenge_use_is_atomic(
+    store: PostgresAuthStore,
+    settings: AuthSettings,
+    database_url: str,
+) -> None:
+    auth = AuthService(store=store, settings=settings)
+    user = await auth.create_admin(
+        email="passkey@example.com",
+        display_name="Passkey Admin",
+        password=ADMIN_PASSWORD,
+    )
+    password_session = await auth.login(user.email, ADMIN_PASSWORD)
+    passkeys = PasskeyService(
+        store=store,
+        settings=settings,
+        signer=auth.signer,
+        adapter=WebAuthnAdapter(
+            rp_id=RP_ID,
+            rp_name=settings.effective_passkey_rp_name,
+            timeout_ms=settings.passkey_timeout_ms,
+        ),
+    )
+    authenticator = VirtualAuthenticator()
+
+    registration = await passkeys.begin_registration(password_session.principal, ORIGIN)
+    registration_response = authenticator.registration_response(
+        challenge=decode_base64url(registration.public_key["challenge"]),
+        rp_id=RP_ID,
+        origin=ORIGIN,
+    )
+    credential = await passkeys.finish_registration(
+        password_session.principal,
+        registration.ceremony_id,
+        "PostgreSQL platform passkey",
+        registration_response,
+        ORIGIN,
+    )
+
+    authentication = await passkeys.begin_authentication(ORIGIN)
+    authentication_response = authenticator.authentication_response(
+        challenge=decode_base64url(authentication.public_key["challenge"]),
+        rp_id=RP_ID,
+        origin=ORIGIN,
+        user_id=user.id,
+        sign_count=1,
+    )
+
+    async def authenticate(ceremony_id, response) -> object:
+        try:
+            return await passkeys.finish_authentication(
+                ceremony_id,
+                response,
+                ORIGIN,
+            )
+        except AuthError as error:
+            return error
+
+    outcomes = await asyncio.gather(
+        authenticate(authentication.ceremony_id, authentication_response),
+        authenticate(authentication.ceremony_id, authentication_response),
+    )
+    success = [item for item in outcomes if not isinstance(item, AuthError)]
+    failure = [item for item in outcomes if isinstance(item, AuthError)]
+
+    assert len(success) == 1
+    assert len(failure) == 1
+    assert failure[0].code is AuthErrorCode.PASSKEY_CHALLENGE_INVALID
+    assert (await auth.authenticate(success[0].access_token)).user_id == user.id
+
+    first_counter = await passkeys.begin_authentication(ORIGIN)
+    second_counter = await passkeys.begin_authentication(ORIGIN)
+    first_response = authenticator.authentication_response(
+        challenge=decode_base64url(first_counter.public_key["challenge"]),
+        rp_id=RP_ID,
+        origin=ORIGIN,
+        user_id=user.id,
+        sign_count=2,
+    )
+    second_response = authenticator.authentication_response(
+        challenge=decode_base64url(second_counter.public_key["challenge"]),
+        rp_id=RP_ID,
+        origin=ORIGIN,
+        user_id=user.id,
+        sign_count=2,
+    )
+    counter_outcomes = await asyncio.gather(
+        authenticate(first_counter.ceremony_id, first_response),
+        authenticate(second_counter.ceremony_id, second_response),
+    )
+    counter_success = [item for item in counter_outcomes if not isinstance(item, AuthError)]
+    counter_failure = [item for item in counter_outcomes if isinstance(item, AuthError)]
+
+    assert len(counter_success) == 1
+    assert len(counter_failure) == 1
+    assert counter_failure[0].code is AuthErrorCode.PASSKEY_AUTHENTICATION_INVALID
+
+    with psycopg.connect(sync_url(database_url)) as connection:
+        stored = connection.execute(
+            """
+            SELECT sign_count, last_used_at, revoked_at
+            FROM epok_auth.passkey_credential
+            WHERE id = %s
+            """,
+            (credential.id,),
+        ).fetchone()
+        consumed = connection.execute(
+            """
+            SELECT count(*)
+            FROM epok_auth.passkey_challenge
+            WHERE id = %s AND consumed_at IS NOT NULL
+            """,
+            (authentication.ceremony_id,),
+        ).fetchone()[0]
+
+    assert stored[0] == 2
+    assert stored[1] is not None
+    assert stored[2] is None
+    assert consumed == 1
+
+    with (
+        psycopg.connect(sync_url(database_url), autocommit=True) as connection,
+        pytest.raises(psycopg.errors.CheckViolation),
+    ):
+        connection.execute(
+            """
+            UPDATE epok_auth.passkey_credential
+            SET device_type = 'single_device', backed_up = true
+            WHERE id = %s
+            """,
+            (credential.id,),
+        )
+
+
+def test_passkey_migration_downgrades_and_upgrades_cleanly(database_url: str) -> None:
+    try:
+        downgrade_database(database_url, "0001_initial")
+        with psycopg.connect(sync_url(database_url)) as connection:
+            credential_table = connection.execute(
+                "SELECT to_regclass('epok_auth.passkey_credential')"
+            ).fetchone()[0]
+            challenge_table = connection.execute(
+                "SELECT to_regclass('epok_auth.passkey_challenge')"
+            ).fetchone()[0]
+        assert credential_table is None
+        assert challenge_table is None
+    finally:
+        upgrade_database(database_url)
+    check_database(database_url)

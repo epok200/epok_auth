@@ -4,7 +4,7 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-> **Status:** `0.1.0b1` public beta on PyPI. The standalone library gate is green. Colors integration and application-level parity remain required before using this beta in that product. Public APIs may still change before `1.0`.
+> **Status:** `0.2.0` release candidate in this repository. `0.1.0` is the latest published version and does not include passkeys. Publication and product rollout remain separate approvals. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -14,8 +14,8 @@ The clean beta tree is continuously validated by GitHub Actions. The current can
 
 | Gate | Evidence |
 |---|---|
-| Functional and adversarial tests | 101/101 passing |
-| Branch coverage | 94.80% |
+| Functional and adversarial tests | 189/189 passing, plus two browser client proofs |
+| Branch coverage | 94.61% |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |
@@ -37,16 +37,20 @@ The repository does not claim that vulnerabilities are impossible. The green gat
 - secure cookies, CSRF correlation and strict Origin allowlists;
 - account lockout, uniform login failures and security-event persistence;
 - plug-and-play FastAPI routers and dependencies;
+- WebAuthn passkey registration, discoverable login, listing and revocation;
 - packaged Alembic migrations and an operational CLI;
 - a Nuxt/Nitro BFF reference where Vue never receives access or refresh tokens.
 
-Google OIDC, TOTP/MFA, passkeys, Redis coordination, multi-tenancy and service-to-service authentication remain outside this beta. See [ROADMAP.md](ROADMAP.md).
+Google OIDC, TOTP/MFA, Redis coordination, multi-tenancy and service-to-service authentication remain outside this beta. See [ROADMAP.md](ROADMAP.md).
 
 ## Installation
 
 ```bash
-uv add "epok-auth[postgres]==0.1.0b1"
+uv add "epok-auth[postgres,passkeys]==0.2.0"
 ```
+
+The command above applies after `0.2.0` is published. During source review, install the
+built wheel or source distribution produced by `uv build --no-sources`.
 
 Generate a secret and configure the application:
 
@@ -61,6 +65,8 @@ EPOK_AUTH_JWT_SECRET=<generated-secret>
 EPOK_AUTH_ISSUER=colors-auth
 EPOK_AUTH_AUDIENCE=colors-api
 EPOK_AUTH_TRUSTED_ORIGINS=https://colors.example.com
+EPOK_AUTH_PASSKEY_RP_ID=example.com
+EPOK_AUTH_PASSKEY_RP_NAME=Colors
 ```
 
 Production configuration is **fail-closed**: weak secrets, insecure cookies, generic issuer/audience values, missing PostgreSQL, and ambiguous origins prevent startup.
@@ -87,7 +93,7 @@ uv run scripts/publish.py --dry-run
 uv run scripts/publish.py
 ```
 
-The normal command validates Python 3.12–3.14, launches disposable PostgreSQL 17, runs migrations, drift checks, integration, concurrency and coverage, builds and installs wheel/sdist, simulates the upload, publishes after an exact-version confirmation, pushes the tag and verifies the public PyPI installation.
+The normal command validates Python 3.12 through 3.14, launches disposable PostgreSQL 17, runs migrations, drift checks, integration, concurrency and coverage, builds and installs wheel/sdist, simulates the upload, publishes after an exact-version confirmation, pushes the tag and verifies the public PyPI installation.
 
 The script uses inline PEP 723 dependencies and `uv run --isolated`, so it does not replace the developer's project `.venv`. The legacy `bash scripts/publish.sh` command remains as a thin alias. See [docs/PUBLISHING.md](docs/PUBLISHING.md) for the complete procedure.
 
@@ -117,6 +123,7 @@ auth.install(
     app,
     prefix="/api/v1/auth",
     include_admin=True,
+    include_passkeys=True,
 )
 
 catalog = auth.protected_router(prefix="/api/v1/catalog")
@@ -147,6 +154,12 @@ POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 POST /api/v1/auth/change-password
 GET  /api/v1/auth/me
+POST /api/v1/auth/passkeys/registration/options
+POST /api/v1/auth/passkeys/registration/verify
+POST /api/v1/auth/passkeys/authentication/options
+POST /api/v1/auth/passkeys/authentication/verify
+GET  /api/v1/auth/passkeys
+DELETE /api/v1/auth/passkeys/{passkey_id}
 ```
 
 With `include_admin=True` it also exposes protected user administration under `/api/v1/auth/users`.
@@ -184,7 +197,9 @@ Vue receives only safe user/session state. Access and refresh credentials remain
 
 ## Documentation
 
+- [Development process and quality gates](DEVELOPMENT.md)
 - [Minimal usage and test guide in Spanish](docs/USAGE_ES.md)
+- [Passkeys integration guide in Spanish](docs/PASSKEYS_ES.md)
 - [Publishing and versioning](docs/PUBLISHING.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Security assurance](docs/SECURITY_ASSURANCE.md)
@@ -212,4 +227,4 @@ uv run pyright
 uv run pytest
 ```
 
-Pull requests must pass the GitHub Actions `CI / merge-gate`, including PostgreSQL 17, Python 3.12–3.14, branch coverage, dependency auditing, packaging and isolated installation. `CodeQL` must also pass.
+Pull requests must pass the GitHub Actions `CI / merge-gate`, including PostgreSQL 17, Python 3.12 through 3.14, branch coverage, dependency auditing, packaging and isolated installation. `CodeQL` must also pass.

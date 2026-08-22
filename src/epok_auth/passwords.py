@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import hmac
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Self
 
 from epok_auth.errors import AuthError, AuthErrorCode
 
@@ -109,7 +107,7 @@ class PasswordManager:
         maximum: int = 128,
         password_hash: PasswordHash | None = None,
         additional_rules: tuple[PasswordRule, ...] = (),
-    ) -> PasswordManager:
+    ) -> Self:
         return cls(
             rules=(PasswordLengthRule(minimum, maximum), CommonPasswordRule(), *additional_rules),
             password_hash=password_hash,

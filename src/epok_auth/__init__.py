@@ -4,6 +4,7 @@ from epok_auth.config import AuthSettings, Environment
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.fastapi import EpokAuth
 from epok_auth.models import Principal, UserAccount, UserStatus
+from epok_auth.passkeys import PasskeyCredential, PasskeyOptions, PasskeyService
 
 try:
     __version__ = version("epok-auth")
@@ -16,6 +17,9 @@ __all__ = [
     "AuthSettings",
     "Environment",
     "EpokAuth",
+    "PasskeyCredential",
+    "PasskeyOptions",
+    "PasskeyService",
     "Principal",
     "UserAccount",
     "UserStatus",

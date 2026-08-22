@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -58,7 +56,7 @@ class PrincipalResponse(BaseModel):
     authenticated_at: datetime
 
     @classmethod
-    def from_principal(cls, principal: Principal) -> PrincipalResponse:
+    def from_principal(cls, principal: Principal) -> Self:
         return cls(
             id=principal.user_id,
             email=principal.email,
@@ -85,7 +83,7 @@ class UserResponse(BaseModel):
     updated_at: datetime | None
 
     @classmethod
-    def from_user(cls, user: UserAccount) -> UserResponse:
+    def from_user(cls, user: UserAccount) -> Self:
         return cls(
             id=user.id,
             email=user.email,
@@ -112,7 +110,7 @@ class SessionResponse(BaseModel):
     user: PrincipalResponse
 
     @classmethod
-    def from_bundle(cls, bundle: SessionBundle) -> SessionResponse:
+    def from_bundle(cls, bundle: SessionBundle) -> Self:
         return cls(
             access_token=bundle.access_token,
             expires_in=bundle.access_expires_in,
@@ -128,7 +126,7 @@ class ProvisionedUserResponse(BaseModel):
     temporary_password: str
 
     @classmethod
-    def from_result(cls, result: ProvisionedUser) -> ProvisionedUserResponse:
+    def from_result(cls, result: ProvisionedUser) -> Self:
         return cls(
             user=UserResponse.from_user(result.user),
             temporary_password=result.temporary_password,

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -10,6 +8,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     Table,
     Text,
@@ -128,4 +127,92 @@ security_event = Table(
     ),
     Index("ix_epok_auth_event_user_time", "user_id", "occurred_at"),
     Index("ix_epok_auth_event_type_time", "event_type", "occurred_at"),
+)
+
+passkey_credential = Table(
+    "passkey_credential",
+    metadata,
+    Column("id", Uuid(as_uuid=True), primary_key=True),
+    Column(
+        "user_id",
+        Uuid(as_uuid=True),
+        ForeignKey("user_account.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("credential_id", LargeBinary, nullable=False),
+    Column("public_key", LargeBinary, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("sign_count", BigInteger, nullable=False, server_default="0"),
+    Column("aaguid", Text, nullable=False),
+    Column("transports", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("device_type", Text, nullable=False),
+    Column("backed_up", Boolean, nullable=False, server_default=text("false")),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("last_used_at", DateTime(timezone=True)),
+    Column("revoked_at", DateTime(timezone=True)),
+    UniqueConstraint("credential_id", name="uq_epok_auth_passkey_credential_id"),
+    CheckConstraint(
+        "octet_length(credential_id) BETWEEN 1 AND 1023",
+        name="ck_epok_auth_passkey_credential_id_length",
+    ),
+    CheckConstraint(
+        "octet_length(public_key) BETWEEN 1 AND 16384",
+        name="ck_epok_auth_passkey_public_key_length",
+    ),
+    CheckConstraint("length(name) BETWEEN 1 AND 100", name="ck_epok_auth_passkey_name_length"),
+    CheckConstraint("sign_count >= 0", name="ck_epok_auth_passkey_sign_count"),
+    CheckConstraint("length(aaguid) BETWEEN 1 AND 36", name="ck_epok_auth_passkey_aaguid"),
+    CheckConstraint(
+        "jsonb_typeof(transports) = 'array'",
+        name="ck_epok_auth_passkey_transports_array",
+    ),
+    CheckConstraint(
+        "device_type IN ('single_device', 'multi_device')",
+        name="ck_epok_auth_passkey_device_type",
+    ),
+    CheckConstraint(
+        "NOT backed_up OR device_type = 'multi_device'",
+        name="ck_epok_auth_passkey_backup_state",
+    ),
+    Index("ix_epok_auth_passkey_user", "user_id"),
+)
+
+passkey_challenge = Table(
+    "passkey_challenge",
+    metadata,
+    Column("id", Uuid(as_uuid=True), primary_key=True),
+    Column("purpose", Text, nullable=False),
+    Column("challenge", LargeBinary, nullable=False),
+    Column("origin", Text, nullable=False),
+    Column(
+        "user_id",
+        Uuid(as_uuid=True),
+        ForeignKey("user_account.id", ondelete="CASCADE"),
+    ),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("consumed_at", DateTime(timezone=True)),
+    UniqueConstraint("challenge", name="uq_epok_auth_passkey_challenge"),
+    CheckConstraint(
+        "purpose IN ('registration', 'authentication')",
+        name="ck_epok_auth_passkey_challenge_purpose",
+    ),
+    CheckConstraint(
+        "octet_length(challenge) = 32",
+        name="ck_epok_auth_passkey_challenge_length",
+    ),
+    CheckConstraint(
+        "length(origin) BETWEEN 1 AND 2048",
+        name="ck_epok_auth_passkey_challenge_origin_length",
+    ),
+    CheckConstraint(
+        "created_at < expires_at AND (consumed_at IS NULL OR consumed_at >= created_at)",
+        name="ck_epok_auth_passkey_challenge_times",
+    ),
+    CheckConstraint(
+        "(purpose = 'registration' AND user_id IS NOT NULL) OR "
+        "(purpose = 'authentication' AND user_id IS NULL)",
+        name="ck_epok_auth_passkey_challenge_user",
+    ),
+    Index("ix_epok_auth_passkey_challenge_expiry", "expires_at"),
 )

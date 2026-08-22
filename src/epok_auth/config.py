@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 import secrets
 from enum import StrEnum
@@ -79,6 +77,13 @@ class AuthSettings(BaseSettings):
     trusted_origins: tuple[str, ...] = ()
     require_origin: bool = True
 
+    passkey_rp_id: str | None = Field(default=None, min_length=1, max_length=253)
+    passkey_rp_name: str | None = Field(default=None, min_length=1, max_length=100)
+    passkey_challenge_ttl_seconds: int = Field(default=300, ge=60, le=600)
+    passkey_timeout_ms: int = Field(default=60_000, ge=15_000, le=300_000)
+    passkey_registration_max_age_seconds: int = Field(default=300, ge=0, le=3600)
+    passkey_max_credentials_per_user: int = Field(default=10, ge=1, le=50)
+
     admin_role: str = Field(default="admin", min_length=1, max_length=100)
     default_user_role: str = Field(default="user", min_length=1, max_length=100)
 
@@ -151,6 +156,40 @@ class AuthSettings(BaseSettings):
             raise ValueError("trusted_origins must not contain duplicates")
         return tuple(normalized)
 
+    @field_validator("passkey_rp_id")
+    @classmethod
+    def normalize_passkey_rp_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        candidate = value.strip().rstrip(".").casefold()
+        if not candidate or "://" in candidate or any(mark in candidate for mark in "/:#?@"):
+            raise ValueError("passkey_rp_id must be a domain without scheme, port or path")
+        try:
+            normalized = candidate.encode("idna").decode("ascii")
+        except UnicodeError as error:
+            raise ValueError("passkey_rp_id must be a valid domain") from error
+        labels = normalized.split(".")
+        if len(normalized) > 253 or any(
+            not label
+            or len(label) > 63
+            or label.startswith("-")
+            or label.endswith("-")
+            or re.fullmatch(r"[a-z0-9-]+", label) is None
+            for label in labels
+        ):
+            raise ValueError("passkey_rp_id must be a valid domain")
+        return normalized
+
+    @field_validator("passkey_rp_name")
+    @classmethod
+    def normalize_passkey_rp_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped or any(ord(character) < 32 for character in stripped):
+            raise ValueError("passkey_rp_name must be printable text")
+        return stripped
+
     @field_validator("refresh_cookie_name", "csrf_cookie_name", "csrf_header_name")
     @classmethod
     def validate_http_name(cls, value: str) -> str:
@@ -207,6 +246,10 @@ class AuthSettings(BaseSettings):
     def effective_csrf_cookie_name(self) -> str:
         return self._cookie_name(self.csrf_cookie_name)
 
+    @property
+    def effective_passkey_rp_name(self) -> str:
+        return self.passkey_rp_name or self.issuer
+
     def _cookie_name(self, name: str) -> str:
         clean = name.removeprefix("__Host-")
         return f"__Host-{clean}" if self.cookie_use_host_prefix else clean
@@ -221,6 +264,7 @@ class AuthSettings(BaseSettings):
             "secure_cookies": False,
             "cookie_use_host_prefix": False,
             "trusted_origins": ("http://localhost:3000", "http://127.0.0.1:3000"),
+            "passkey_rp_id": "localhost",
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]

@@ -4,10 +4,11 @@ This document maps beta capabilities to executable evidence. It is not a claim t
 
 ## Candidate evidence snapshot
 
-The `0.1.0b1` candidate is accepted by the standalone library gate only after all of the following complete successfully on a clean GitHub runner:
+The `0.2.0` candidate is accepted by the standalone library gate only after all of the following complete successfully on a clean GitHub runner:
 
-- 101 tests pass, including PostgreSQL integration and concurrency cases;
-- branch-aware coverage reaches 94.80%;
+- 189 tests pass, including PostgreSQL integration and concurrency cases;
+- the browser reference client passes a Node unit proof and a real Chromium flow;
+- branch-aware coverage reaches 94.61%;
 - the non-integration suite passes on Python 3.12, 3.13 and 3.14;
 - PostgreSQL 17 migrates from an empty database and Alembic reports no metadata drift;
 - Ruff formatting, lint and security rules pass;
@@ -32,8 +33,16 @@ The `0.1.0b1` candidate is accepted by the standalone library gate only after al
 | Immediate revocation | Logout, disable, lock and password change invalidate access | service and HTTP tests |
 | Session lifetime | Idle refresh never extends the absolute deadline | session expiry tests |
 | CSRF/Origin | Cookie operations require correlation and trusted origin | service and HTTP abuse tests |
+| Passkey registration | Real WebAuthn attestation is verified before unique credential persistence | `tests/passkeys/test_webauthn_flow.py`, HTTP and PostgreSQL flow |
+| Passkey authentication | Real signed assertions issue the standard authoritative session | virtual authenticator, HTTP and PostgreSQL flow |
+| Passkey replay | Ceremony challenge is temporary and consumed atomically once | service, real adapter and PostgreSQL concurrency tests |
+| Passkey origin binding | Trusted Origin, RP ID, client origin and cross-origin flags fail closed | service and real adapter adversarial tests |
+| Passkey ownership | Discoverable `userHandle` matches the credential owner | real adapter adversarial tests |
+| Passkey lifecycle | Multiple credentials can be listed and individually revoked | service and HTTP flow tests |
+| Browser passkey client | Unit mocks cover binary conversion and headless Chromium completes the real six-route ceremony with a virtual WebAuthn authenticator | `browser.test.mjs`, `browser.e2e.test.mjs` |
 | Last administrator | Concurrent operations cannot remove the final active admin | memory and PostgreSQL invariant tests |
 | Secret redaction | Validation and auth responses do not echo submitted secrets | HTTP and CLI tests |
+| Audit IP integrity | Direct clients cannot spoof event IPs with forwarding headers | HTTP abuse tests |
 | Configuration | Production rejects weak secrets, insecure cookies and ambiguous origins | `test_config.py` |
 | Migration safety | Empty-database migration commits and schema metadata remains drift-free | PostgreSQL 17 job and `test_migrate.py` |
 | Packaging | Built wheel imports and exposes CLI in an isolated environment | GitHub Actions package job |

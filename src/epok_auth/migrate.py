@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable
 from importlib.resources import as_file, files
 from pathlib import Path

@@ -19,6 +19,7 @@ token*.json
 
 # Python and tooling
 .venv/
+node_modules/
 __pycache__/
 *.py[cod]
 .pytest_cache/

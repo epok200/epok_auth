@@ -21,7 +21,7 @@ jobs:
   quality:
     name: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
@@ -48,7 +48,16 @@ jobs:
       - name: Strict typing
         run: uv run pyright
       - name: Compile all modules
-        run: uv run python -m compileall -q src tests examples/minimal scripts/publish.py
+        run: uv run python -m compileall -q src tests examples scripts/publish.py
+      - name: Install Chromium passkey proof
+        working-directory: examples/passkeys
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npx playwright install --with-deps chromium
+      - name: Browser passkey unit and end-to-end proofs
+        working-directory: examples/passkeys
+        run: node --test browser.test.mjs browser.e2e.test.mjs
       - name: Dependency vulnerability audit
         run: uv run pip-audit --local --progress-spinner off
 
@@ -185,9 +194,28 @@ jobs:
           test "$(find dist -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
           test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 1
           python -m zipfile -l "$wheel" | grep 'epok_auth/migrations/versions/0001_initial.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/migrations/versions/0002_passkeys.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/passkeys/service.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/passkeys/webauthn.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/errores/excepcion.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/errors.py'
           python -m zipfile -l "$wheel" | grep 'epok_auth/py.typed'
           tar -tzf "$sdist" | grep 'src/epok_auth/migrations/versions/0001_initial.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/migrations/versions/0002_passkeys.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/passkeys/service.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/passkeys/webauthn.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/errores/excepcion.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/errors.py'
           tar -tzf "$sdist" | grep 'src/epok_auth/py.typed'
+          uv run --no-project --with 'rich>=13,<16' -- python - "$wheel" "$sdist" <<'PY'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "scripts")
+          from release_artifacts import ArtifactValidator
+
+          ArtifactValidator.validate(Path(sys.argv[1]), Path(sys.argv[2]))
+          PY
       - name: Isolated wheel and sdist smoke tests
         shell: bash
         run: |
@@ -204,16 +232,34 @@ jobs:
             EPOK_AUTH_EXPECTED_VERSION="$expected_version" \
               "$environment/bin/python" - <<'PY'
           import os
+          from importlib.util import find_spec
           from importlib.metadata import version
 
           import epok_auth
+          from fastapi import FastAPI
           from epok_auth import AuthSettings, EpokAuth
+          from epok_auth.errores import AppError, CodigoError
+          from epok_auth.errors import AuthError, AuthErrorCode, invalid_session
+          from epok_auth.testing import MemoryAuthStore
 
           expected = os.environ["EPOK_AUTH_EXPECTED_VERSION"]
           assert version("epok-auth") == expected
           assert epok_auth.__version__ == expected
           assert AuthSettings is not None
           assert EpokAuth is not None
+          assert epok_auth.PasskeyService is not None
+          assert find_spec("webauthn") is None
+          assert epok_auth.AuthError is AuthError is AppError
+          assert epok_auth.AuthErrorCode is AuthErrorCode is CodigoError
+          assert invalid_session().status_code == 401
+          assert invalid_session().headers == {"WWW-Authenticate": "Bearer"}
+          auth = EpokAuth(settings=AuthSettings.development(), store=MemoryAuthStore())
+          try:
+              auth.install(FastAPI(), include_passkeys=True)
+          except RuntimeError as error:
+              assert "epok-auth[passkeys]" in str(error)
+          else:
+              raise AssertionError("passkeys enabled without the optional dependency")
           PY
             "$environment/bin/epok-auth" --help >/dev/null
             "$environment/bin/epok-auth" generate-secret --bytes 32 | grep -E '.{40,}'
@@ -221,6 +267,25 @@ jobs:
 
           smoke_test "$wheel" /tmp/epok-auth-wheel-smoke
           smoke_test "$sdist" /tmp/epok-auth-sdist-smoke
+
+          documented_extras_smoke_test() {
+            artifact="$1"
+            environment="$2"
+            uv venv "$environment" --python 3.12
+            uv pip install --python "$environment/bin/python" "${artifact}[postgres,passkeys]"
+            "$environment/bin/python" - <<'PY'
+          from epok_auth import PasskeyService
+          from epok_auth.passkeys.webauthn import WebAuthnAdapter
+          from epok_auth.postgres import PostgresAuthStore
+
+          assert PasskeyService is not None
+          assert WebAuthnAdapter is not None
+          assert PostgresAuthStore is not None
+          PY
+          }
+
+          documented_extras_smoke_test "$wheel" /tmp/epok-auth-wheel-extras-smoke
+          documented_extras_smoke_test "$sdist" /tmp/epok-auth-sdist-extras-smoke
 
   merge-gate:
     name: merge-gate

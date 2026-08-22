@@ -1,8 +1,12 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie pública de `epok-auth 0.1.0b1` con lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar cada operación disponible.
+Esta guía documenta la superficie pública del candidato `epok-auth 0.2.0` con lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar cada operación disponible.
 
 La ruta recomendada para la primera prueba es usar `AuthSettings`, `EpokAuth.postgres()` y `auth.install()`. Los helpers internos y las clases de persistencia no son necesarios para validar la beta.
+
+Para registrar e iniciar sesión con passkeys, sigue la guía dedicada en
+[`PASSKEYS_ES.md`](PASSKEYS_ES.md). Incluye instalación, configuración, API y un cliente
+de navegador listo para reutilizar.
 
 ## 1. Requisitos
 
@@ -353,7 +357,7 @@ print(settings.effective_csrf_cookie_name)
 
 ## 10. Referencia de `EpokAuth`
 
-### `EpokAuth(settings=..., store=..., service=None)`
+### `EpokAuth(settings=..., store=..., service=None, passkeys=None)`
 
 Construye la integración utilizando un store proporcionado manualmente. Se usa principalmente para adaptadores personalizados o pruebas.
 
@@ -394,18 +398,20 @@ auth = EpokAuth.postgres(
 
 ### `auth.install(app, ...)`
 
-Instala las rutas de autenticación, opcionalmente las rutas administrativas y los manejadores de errores.
+Instala las rutas de autenticación, opcionalmente las rutas administrativas, passkeys y los manejadores de errores.
 
 ```python
 auth.install(
     app,
     prefix="/api/v1/auth",
     include_admin=True,
+    include_passkeys=True,
     admin_prefix="/users",
 )
 ```
 
 Para la primera prueba esta es la función recomendada.
+`include_passkeys=True` requiere el extra `passkeys` y `EPOK_AUTH_PASSKEY_RP_ID`.
 
 ### `auth.router(prefix=...)`
 

@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from typing import Self
 from uuid import UUID
 
 SecurityMetadata = dict[str, str | int | bool | None]
@@ -34,6 +33,11 @@ class SecurityEventType(StrEnum):
     REFRESH_REUSE_DETECTED = "refresh.reuse_detected"
     LOGOUT = "session.logout"
     SESSIONS_REVOKED = "sessions.revoked"
+    PASSKEY_REGISTERED = "passkey.registered"
+    PASSKEY_REGISTRATION_FAILED = "passkey.registration_failed"
+    PASSKEY_LOGIN_SUCCEEDED = "passkey.login_succeeded"
+    PASSKEY_LOGIN_FAILED = "passkey.login_failed"
+    PASSKEY_REVOKED = "passkey.revoked"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +55,11 @@ class UserAccount:
     password_changed_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    def can_authenticate(self, now: datetime) -> bool:
+        return self.status is UserStatus.ACTIVE and not (
+            self.locked_until and self.locked_until > now
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +120,13 @@ class AccessClaims:
 
 
 @dataclass(frozen=True, slots=True)
+class RequestContext:
+    request_id: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SecurityEvent:
     event_type: SecurityEventType
     occurred_at: datetime
@@ -121,12 +137,27 @@ class SecurityEvent:
     user_agent: str | None = None
     metadata: SecurityMetadata = field(default_factory=_empty_security_metadata)
 
-
-@dataclass(frozen=True, slots=True)
-class RequestContext:
-    request_id: str | None = None
-    ip_address: str | None = None
-    user_agent: str | None = None
+    @classmethod
+    def from_request(
+        cls,
+        event_type: SecurityEventType,
+        occurred_at: datetime,
+        *,
+        context: RequestContext,
+        user_id: UUID | None = None,
+        session_id: UUID | None = None,
+        metadata: SecurityMetadata | None = None,
+    ) -> Self:
+        return cls(
+            event_type=event_type,
+            occurred_at=occurred_at,
+            user_id=user_id,
+            session_id=session_id,
+            request_id=_bounded(context.request_id, 200),
+            ip_address=_bounded(context.ip_address, 64),
+            user_agent=_bounded(context.user_agent, 500),
+            metadata=dict(metadata) if metadata is not None else {},
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,3 +172,7 @@ class UserUpdate:
     status: UserStatus | None = None
     roles: tuple[str, ...] | None = None
     scopes: tuple[str, ...] | None = None
+
+
+def _bounded(value: str | None, maximum: int) -> str | None:
+    return value[:maximum] if value is not None else None

@@ -7,149 +7,48 @@
 # ]
 # ///
 
-from __future__ import annotations
-
 import ast
 import os
 import re
 import secrets
-import shlex
 import shutil
-import subprocess
-import tempfile
+import stat
+import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
 from packaging.version import InvalidVersion, Version
-from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
-from rich.table import Table
 
-PROJECT_NAME = "epok-auth"
-ROOT = Path(__file__).resolve().parents[1]
-DIST_DIR = ROOT / "dist"
-SECRET_FILE = ROOT / ".env.secret"
-PUBLISH_URL = "https://upload.pypi.org/legacy/"
-CHECK_URL = "https://pypi.org/simple/"
-SUPPORTED_PYTHONS = ("3.12", "3.13", "3.14")
-TOKEN_NAME = "UV_PUBLISH_TOKEN"
-TOKEN_PLACEHOLDER = "REPLACE_WITH_YOUR_TOKEN"
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from release_artifacts import (  # noqa: E402
+    build_and_smoke_test,
+    create_and_push_tag,
+    publish_arguments,
+    verify_public_install,
+)
+from release_support import (  # noqa: E402
+    PROJECT_NAME,
+    ROOT,
+    SECRET_FILE,
+    SUPPORTED_PYTHONS,
+    TOKEN_NAME,
+    TOKEN_PLACEHOLDER,
+    Pipeline,
+    PostgresRuntime,
+    ReleaseContext,
+    ReleaseError,
+    Toolchain,
+    console,
+)
+
 TOKEN_PATTERN = re.compile(r"^pypi-[A-Za-z0-9_-]+$")
-
-console = Console()
-
-
-class ReleaseError(RuntimeError):
-    """A release invariant was not satisfied."""
-
-
-@dataclass(frozen=True, slots=True)
-class Toolchain:
-    git: str
-    uv: str
-    docker: str
-
-
-@dataclass(frozen=True, slots=True)
-class ReleaseContext:
-    tools: Toolchain
-    version: str
-    commit: str
-    publish_token: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class PostgresRuntime:
-    container_name: str
-    database_url: str
-
-
-@dataclass(frozen=True, slots=True)
-class StepResult:
-    name: str
-    duration_seconds: float
-
-
-class Pipeline:
-    def __init__(self) -> None:
-        self.results: list[StepResult] = []
-
-    def run(
-        self,
-        title: str,
-        command: list[str],
-        *,
-        env: dict[str, str] | None = None,
-        capture: bool = False,
-        quiet: bool = False,
-        check: bool = True,
-    ) -> subprocess.CompletedProcess[str]:
-        merged_env = os.environ.copy()
-        if env:
-            merged_env.update(env)
-
-        if not quiet:
-            console.rule(f"[bold cyan]{title}")
-            console.print(f"[dim]$ {shlex.join(command)}[/dim]")
-
-        started = time.monotonic()
-        completed = subprocess.run(  # noqa: S603 - trusted release commands only.
-            command,
-            cwd=ROOT,
-            env=merged_env,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE if capture else None,
-            stderr=subprocess.PIPE if capture else None,
-        )
-        elapsed = time.monotonic() - started
-
-        if check and completed.returncode != 0:
-            if capture:
-                if completed.stdout:
-                    console.print(completed.stdout.rstrip())
-                if completed.stderr:
-                    console.print(completed.stderr.rstrip(), style="red")
-            raise ReleaseError(
-                f"Step '{title}' failed with exit code {completed.returncode}:\n"
-                f"{shlex.join(command)}"
-            )
-
-        if check:
-            self.results.append(StepResult(title, elapsed))
-            if not quiet:
-                console.print(f"[bold green]✓[/bold green] {title} [dim]({elapsed:.1f}s)[/dim]")
-        return completed
-
-    def capture(self, command: list[str], *, check: bool = True) -> str:
-        completed = self.run(
-            "internal command",
-            command,
-            capture=True,
-            quiet=True,
-            check=check,
-        )
-        return (completed.stdout or "").strip()
-
-    def summary(self, context: ReleaseContext, *, mode: str, tagged: bool) -> None:
-        table = Table(title="epok-auth release summary", show_header=False)
-        table.add_column("Field", style="bold")
-        table.add_column("Value")
-        table.add_row("Version", context.version)
-        table.add_row("Commit", context.commit[:12])
-        table.add_row("Mode", mode)
-        table.add_row("Completed checks", str(len(self.results)))
-        if mode == "published":
-            table.add_row("PyPI", "verified")
-            table.add_row("Tag", f"v{context.version}" if tagged else "not created")
-        else:
-            table.add_row("PyPI", "not uploaded")
-            table.add_row("Tag", "not created")
-        console.print(table)
 
 
 def _require_command(name: str) -> str:
@@ -197,10 +96,15 @@ def parse_secret_text(text: str) -> str | None:
 
 
 def _load_publish_token() -> str | None:
-    file_token = (
-        parse_secret_text(SECRET_FILE.read_text(encoding="utf-8")) if SECRET_FILE.exists() else None
-    )
-    environment_token = os.environ.get(TOKEN_NAME)
+    environment_token = os.environ.pop(TOKEN_NAME, None)
+    file_token: str | None = None
+    if SECRET_FILE.exists():
+        if SECRET_FILE.is_symlink():
+            raise ReleaseError(".env.secret must be a regular file, not a symbolic link.")
+        permissions = stat.S_IMODE(SECRET_FILE.stat().st_mode)
+        if permissions & 0o077:
+            raise ReleaseError(".env.secret permissions are too broad. Run: chmod 600 .env.secret")
+        file_token = parse_secret_text(SECRET_FILE.read_text(encoding="utf-8"))
     if file_token and environment_token and file_token != environment_token:
         raise ReleaseError(
             f"{TOKEN_NAME} differs between the environment and .env.secret; "
@@ -452,9 +356,41 @@ def _run_quality_and_tests(
             "-q",
             "src",
             "tests",
-            "examples/minimal",
-            "scripts/publish.py",
+            "examples",
+            "scripts",
         ),
+    )
+    pipeline.run(
+        "Install browser proof dependencies",
+        [context.tools.npm, "ci", "--prefix", "examples/passkeys"],
+    )
+    pipeline.run(
+        "Audit browser proof dependencies",
+        [
+            context.tools.npm,
+            "audit",
+            "--prefix",
+            "examples/passkeys",
+            "--audit-level",
+            "high",
+        ],
+    )
+    pipeline.run(
+        "Install Chromium for the browser proof",
+        [
+            str(ROOT / "examples/passkeys/node_modules/.bin/playwright"),
+            "install",
+            "chromium",
+        ],
+    )
+    pipeline.run(
+        "Browser passkey unit and end-to-end proofs",
+        [
+            context.tools.node,
+            "--test",
+            "examples/passkeys/browser.test.mjs",
+            "examples/passkeys/browser.e2e.test.mjs",
+        ],
     )
     pipeline.run(
         "Dependency vulnerability audit",
@@ -486,13 +422,13 @@ def _run_quality_and_tests(
         runtime = _start_postgres(pipeline, tools)
         database_env = {"TEST_DATABASE_URL": runtime.database_url}
         migration_code = (
-            "import os; "
-            "from epok_auth.migrate import upgrade_database; "
+            "import os\n"
+            "from epok_auth.migrate import upgrade_database\n"
             "upgrade_database(os.environ['TEST_DATABASE_URL'])"
         )
         drift_code = (
-            "import os; "
-            "from epok_auth.migrate import check_database; "
+            "import os\n"
+            "from epok_auth.migrate import check_database\n"
             "check_database(os.environ['TEST_DATABASE_URL'])"
         )
         pipeline.run(
@@ -527,216 +463,25 @@ def _run_quality_and_tests(
         _stop_postgres(pipeline, tools, runtime)
 
 
-def _artifact_paths() -> tuple[Path, Path]:
-    wheels = sorted(DIST_DIR.glob("*.whl"))
-    sdists = sorted(DIST_DIR.glob("*.tar.gz"))
-    if len(wheels) != 1 or len(sdists) != 1:
-        found = ", ".join(path.name for path in sorted(DIST_DIR.glob("*")))
-        raise ReleaseError(
-            "Exactly one wheel and one source distribution are required; "
-            f"found: {found or 'nothing'}."
-        )
-    return wheels[0], sdists[0]
-
-
-def _venv_python(environment: Path) -> Path:
-    if os.name == "nt":
-        return environment / "Scripts" / "python.exe"
-    return environment / "bin" / "python"
-
-
-def _venv_cli(environment: Path) -> Path:
-    if os.name == "nt":
-        return environment / "Scripts" / "epok-auth.exe"
-    return environment / "bin" / "epok-auth"
-
-
-def _smoke_test_artifact(
-    pipeline: Pipeline,
-    context: ReleaseContext,
-    artifact: Path,
-    environment: Path,
-) -> None:
-    pipeline.run(
-        f"Create environment for {artifact.name}",
-        [context.tools.uv, "venv", str(environment), "--python", "3.12"],
-    )
-    python = _venv_python(environment)
-    pipeline.run(
-        f"Install {artifact.name}",
-        [
-            context.tools.uv,
-            "pip",
-            "install",
-            "--python",
-            str(python),
-            str(artifact),
-        ],
-    )
-    check_code = (
-        "import os; "
-        "from importlib.metadata import version; "
-        "import epok_auth; "
-        "from epok_auth import AuthSettings, EpokAuth; "
-        "expected=os.environ['EPOK_AUTH_EXPECTED_VERSION']; "
-        "assert version('epok-auth') == expected; "
-        "assert epok_auth.__version__ == expected; "
-        "assert AuthSettings is not None and EpokAuth is not None"
-    )
-    pipeline.run(
-        f"Verify {artifact.name}",
-        [str(python), "-c", check_code],
-        env={"EPOK_AUTH_EXPECTED_VERSION": context.version},
-    )
-    pipeline.run(
-        f"Verify CLI from {artifact.name}",
-        [str(_venv_cli(environment)), "--help"],
-        capture=True,
-        quiet=True,
-    )
-
-
-def _build_and_smoke_test(
-    pipeline: Pipeline,
-    context: ReleaseContext,
-) -> tuple[Path, Path]:
-    if DIST_DIR.exists():
-        shutil.rmtree(DIST_DIR)
-    pipeline.run(
-        "Build wheel and source distribution",
-        [context.tools.uv, "build", "--no-sources"],
-    )
-    wheel, sdist = _artifact_paths()
-
-    with tempfile.TemporaryDirectory(prefix="epok-auth-release-") as temporary:
-        temporary_path = Path(temporary)
-        _smoke_test_artifact(
-            pipeline,
-            context,
-            wheel,
-            temporary_path / "wheel",
-        )
-        _smoke_test_artifact(
-            pipeline,
-            context,
-            sdist,
-            temporary_path / "sdist",
-        )
-
-    status = pipeline.capture([context.tools.git, "status", "--porcelain", "--untracked-files=no"])
-    if status:
-        raise ReleaseError(
-            f"Release checks modified tracked files. Review the working tree:\n{status}"
-        )
-    return wheel, sdist
-
-
-def _publish_arguments(context: ReleaseContext, *, dry_run: bool) -> list[str]:
-    command = [
-        context.tools.uv,
-        "publish",
-        "--publish-url",
-        PUBLISH_URL,
-        "--check-url",
-        CHECK_URL,
-    ]
-    if dry_run:
-        command.insert(2, "--dry-run")
-    return command
-
-
-def _verify_public_install(
-    pipeline: Pipeline,
-    context: ReleaseContext,
-    *,
-    attempts: int = 6,
-) -> None:
-    requirement = f"{PROJECT_NAME}[postgres]=={context.version}"
-    command = [
-        context.tools.uv,
-        "run",
-        "--no-project",
-        "--refresh-package",
-        PROJECT_NAME,
-        "--with",
-        requirement,
-        "--",
-        "python",
-        "-c",
-        "import epok_auth; print(epok_auth.__version__)",
-    ]
-    for attempt in range(1, attempts + 1):
-        completed = pipeline.run(
-            f"Verify public PyPI installation ({attempt}/{attempts})",
-            command,
-            capture=True,
-            quiet=True,
-            check=False,
-        )
-        output = (completed.stdout or "").strip()
-        if completed.returncode == 0 and output == context.version:
-            console.print(f"[green]✓[/green] PyPI installation verified: {context.version}")
-            return
-        if attempt < attempts:
-            delay = min(2**attempt, 20)
-            console.print(f"[yellow]PyPI has not propagated yet; retrying in {delay}s.[/yellow]")
-            time.sleep(delay)
-    raise ReleaseError(
-        "The upload completed, but the public installation could not yet be verified. "
-        "Do not republish the same version; verify PyPI later."
-    )
-
-
-def _create_and_push_tag(
-    pipeline: Pipeline,
-    context: ReleaseContext,
-) -> None:
-    tag = f"v{context.version}"
-    pipeline.run(
-        f"Create annotated tag {tag}",
-        [
-            context.tools.git,
-            "tag",
-            "-a",
-            tag,
-            "-m",
-            f"{PROJECT_NAME} {context.version}",
-        ],
-    )
-    try:
-        pipeline.run(
-            f"Push tag {tag}",
-            [context.tools.git, "push", "origin", tag],
-        )
-    except ReleaseError:
-        console.print(
-            Panel.fit(
-                f"PyPI publication succeeded, but pushing {tag} failed.\n"
-                f"Run manually: git push origin {tag}",
-                title="Tag recovery",
-                border_style="yellow",
-            )
-        )
-        raise
-
-
 def _prepare_context(
     pipeline: Pipeline,
     *,
     dry_run: bool,
     validate_only: bool,
 ) -> ReleaseContext:
+    token = _load_publish_token()
     tools = Toolchain(
         git=_require_command("git"),
         uv=_require_command("uv"),
         docker=_require_command("docker"),
+        node=_require_command("node"),
+        npm=_require_command("npm"),
     )
     version, commit = _validate_repository(
         pipeline,
         tools,
         allow_existing_tag=validate_only,
     )
-    token = _load_publish_token()
     if not dry_run and not validate_only:
         token = _validate_publish_token(token)
     return ReleaseContext(tools, version, commit, token)
@@ -799,19 +544,19 @@ def main(
         )
 
         _run_quality_and_tests(pipeline, context)
-        _build_and_smoke_test(pipeline, context)
+        build_and_smoke_test(pipeline, context)
 
         if validate_only:
             pipeline.summary(context, mode="validation only", tagged=False)
             return
 
-        publish_env = {}
+        publish_env: dict[str, str] = {}
         if context.publish_token:
             publish_env[TOKEN_NAME] = context.publish_token
 
         pipeline.run(
             "Validate artifacts against PyPI",
-            _publish_arguments(context, dry_run=True),
+            publish_arguments(context, dry_run=True),
             env=publish_env,
         )
         if dry_run:
@@ -826,15 +571,15 @@ def main(
 
         pipeline.run(
             "Publish artifacts to PyPI",
-            _publish_arguments(context, dry_run=False),
+            publish_arguments(context, dry_run=False),
             env=publish_env,
         )
 
         tagged = False
         if tag:
-            _create_and_push_tag(pipeline, context)
+            create_and_push_tag(pipeline, context)
             tagged = True
-        _verify_public_install(pipeline, context)
+        verify_public_install(pipeline, context)
         pipeline.summary(context, mode="published", tagged=tagged)
     except ReleaseError as error:
         _abort(str(error))

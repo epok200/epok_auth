@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
@@ -54,6 +52,24 @@ async def login(client: httpx.AsyncClient, password: str = ADMIN_PASSWORD) -> ht
         json={"email": ADMIN_EMAIL, "password": password},
         headers={"Origin": ORIGIN},
     )
+
+
+@pytest.mark.asyncio
+async def test_security_events_ignore_untrusted_forwarded_ip(settings: AuthSettings) -> None:
+    auth, client = await client_for(settings=settings)
+    async with client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+            headers={
+                "Origin": ORIGIN,
+                "X-Forwarded-For": "203.0.113.10",
+            },
+        )
+
+    assert response.status_code == 200
+    assert isinstance(auth.store, MemoryAuthStore)
+    assert auth.store.events[-1].ip_address == "127.0.0.1"
 
 
 @pytest.mark.asyncio

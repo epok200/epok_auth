@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 
@@ -28,6 +26,7 @@ def test_development_factory_is_safe_for_local_http() -> None:
     assert settings.secure_cookies is False
     assert settings.cookie_use_host_prefix is False
     assert "http://localhost:3000" in settings.trusted_origins
+    assert settings.passkey_rp_id == "localhost"
     assert len(settings.jwt_secret.get_secret_value()) >= 32
 
 
@@ -131,6 +130,29 @@ def test_rejects_invalid_capability_defaults() -> None:
         make(admin_role="Admin User")
     with pytest.raises(ValidationError):
         make(default_user_role="")
+
+
+@pytest.mark.parametrize(
+    "rp_id",
+    [
+        "https://example.com",
+        "example.com:443",
+        "example.com/path",
+        "-example.com",
+        "example..com",
+        "example.com.\0",
+    ],
+)
+def test_rejects_invalid_passkey_rp_ids(rp_id: str) -> None:
+    with pytest.raises(ValidationError):
+        make(passkey_rp_id=rp_id)
+
+
+def test_normalizes_passkey_identity() -> None:
+    settings = make(passkey_rp_id="LOGIN.Example.COM.", passkey_rp_name="  Colors  ")
+
+    assert settings.passkey_rp_id == "login.example.com"
+    assert settings.effective_passkey_rp_name == "Colors"
 
 
 def test_production_fails_closed() -> None:

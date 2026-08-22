@@ -1,19 +1,38 @@
-from __future__ import annotations
-
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any
+from typing import Self
 from uuid import UUID
 
-from sqlalchemy import and_, func, insert, select, text, update
-from sqlalchemy.engine import RowMapping
+from sqlalchemy import and_, delete, func, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from epok_auth.models import RefreshSession, SecurityEvent, UserAccount, UserStatus
-from epok_auth.postgres.tables import refresh_session, security_event, user_account
-from epok_auth.store import AuthTransaction, StoreConflictError
+from epok_auth.passkeys.models import (
+    PasskeyCeremonyPurpose,
+    PasskeyChallenge,
+    PasskeyCredential,
+)
+from epok_auth.passkeys.store import PasskeyTransaction
+from epok_auth.postgres._mapping import (
+    challenge_from_row,
+    challenge_values,
+    passkey_from_row,
+    passkey_values,
+    session_from_row,
+    session_values,
+    user_from_row,
+    user_values,
+)
+from epok_auth.postgres.tables import (
+    passkey_challenge,
+    passkey_credential,
+    refresh_session,
+    security_event,
+    user_account,
+)
+from epok_auth.store import StoreConflictError
 
 _ADMIN_LOCK_ID = int.from_bytes(b"EPOKAUTH", byteorder="big", signed=True)
 
@@ -34,7 +53,7 @@ class PostgresAuthStore:
         pool_timeout: float = 5.0,
         pool_pre_ping: bool = True,
         echo: bool = False,
-    ) -> PostgresAuthStore:
+    ) -> Self:
         engine = create_async_engine(
             async_psycopg_url(url),
             pool_size=pool_size,
@@ -46,7 +65,7 @@ class PostgresAuthStore:
         return cls(engine)
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncGenerator[AuthTransaction, None]:
+    async def transaction(self) -> AsyncGenerator[PasskeyTransaction, None]:
         async with self.engine.begin() as connection:
             yield PostgresAuthTransaction(connection)
 
@@ -85,7 +104,7 @@ class PostgresAuthTransaction:
         if for_update:
             statement = statement.with_for_update()
         row = (await self.connection.execute(statement)).mappings().first()
-        return _user(row) if row else None
+        return user_from_row(row) if row else None
 
     async def get_user_by_id(
         self,
@@ -97,7 +116,7 @@ class PostgresAuthTransaction:
         if for_update:
             statement = statement.with_for_update()
         row = (await self.connection.execute(statement)).mappings().first()
-        return _user(row) if row else None
+        return user_from_row(row) if row else None
 
     async def list_users(self, *, limit: int, offset: int) -> Sequence[UserAccount]:
         statement = (
@@ -107,18 +126,18 @@ class PostgresAuthTransaction:
             .offset(offset)
         )
         rows = (await self.connection.execute(statement)).mappings().all()
-        return tuple(_user(row) for row in rows)
+        return tuple(user_from_row(row) for row in rows)
 
     async def insert_user(self, user: UserAccount) -> None:
         try:
-            await self.connection.execute(insert(user_account).values(_user_values(user)))
+            await self.connection.execute(insert(user_account).values(user_values(user)))
         except IntegrityError as error:
             raise StoreConflictError("user uniqueness constraint failed") from error
 
     async def update_user(self, user: UserAccount) -> None:
         try:
             result = await self.connection.execute(
-                update(user_account).where(user_account.c.id == user.id).values(_user_values(user))
+                update(user_account).where(user_account.c.id == user.id).values(user_values(user))
             )
         except IntegrityError as error:
             raise StoreConflictError("user uniqueness constraint failed") from error
@@ -135,7 +154,7 @@ class PostgresAuthTransaction:
         if for_update:
             statement = statement.with_for_update()
         row = (await self.connection.execute(statement)).mappings().first()
-        return _session(row) if row else None
+        return session_from_row(row) if row else None
 
     async def get_session_by_id(
         self,
@@ -147,11 +166,11 @@ class PostgresAuthTransaction:
         if for_update:
             statement = statement.with_for_update()
         row = (await self.connection.execute(statement)).mappings().first()
-        return _session(row) if row else None
+        return session_from_row(row) if row else None
 
     async def insert_session(self, session: RefreshSession) -> None:
         try:
-            await self.connection.execute(insert(refresh_session).values(_session_values(session)))
+            await self.connection.execute(insert(refresh_session).values(session_values(session)))
         except IntegrityError as error:
             raise StoreConflictError("session uniqueness constraint failed") from error
 
@@ -160,7 +179,7 @@ class PostgresAuthTransaction:
             result = await self.connection.execute(
                 update(refresh_session)
                 .where(refresh_session.c.id == session.id)
-                .values(_session_values(session))
+                .values(session_values(session))
             )
         except IntegrityError as error:
             raise StoreConflictError("session update constraint failed") from error
@@ -207,75 +226,118 @@ class PostgresAuthTransaction:
             )
         )
 
+    async def delete_expired_passkey_challenges(self, now: datetime) -> int:
+        result = await self.connection.execute(
+            delete(passkey_challenge).where(passkey_challenge.c.expires_at <= now)
+        )
+        return int(result.rowcount or 0)
 
-def _user_values(user: UserAccount) -> dict[str, Any]:
-    return {
-        "id": user.id,
-        "email": user.email,
-        "display_name": user.display_name,
-        "password_hash": user.password_hash,
-        "status": user.status.value,
-        "roles": list(user.roles),
-        "scopes": list(user.scopes),
-        "must_change_password": user.must_change_password,
-        "failed_login_attempts": user.failed_login_attempts,
-        "locked_until": user.locked_until,
-        "password_changed_at": user.password_changed_at,
-        "created_at": user.created_at,
-        "updated_at": user.updated_at,
-    }
+    async def insert_passkey_challenge(self, challenge: PasskeyChallenge) -> None:
+        try:
+            await self.connection.execute(
+                insert(passkey_challenge).values(challenge_values(challenge))
+            )
+        except IntegrityError as error:
+            raise StoreConflictError("passkey challenge uniqueness constraint failed") from error
 
+    async def consume_passkey_challenge(
+        self,
+        challenge_id: UUID,
+        purpose: PasskeyCeremonyPurpose,
+        now: datetime,
+        user_id: UUID | None,
+    ) -> PasskeyChallenge | None:
+        user_condition = passkey_challenge.c.user_id.is_(None)
+        if user_id is not None:
+            user_condition = passkey_challenge.c.user_id == user_id
+        statement = (
+            update(passkey_challenge)
+            .where(
+                passkey_challenge.c.id == challenge_id,
+                passkey_challenge.c.purpose == purpose.value,
+                user_condition,
+                passkey_challenge.c.consumed_at.is_(None),
+                passkey_challenge.c.expires_at > now,
+            )
+            .values(consumed_at=now)
+            .returning(passkey_challenge)
+        )
+        row = (await self.connection.execute(statement)).mappings().first()
+        return challenge_from_row(row) if row else None
 
-def _session_values(session: RefreshSession) -> dict[str, Any]:
-    return {
-        "id": session.id,
-        "user_id": session.user_id,
-        "family_id": session.family_id,
-        "token_hash": session.token_hash,
-        "csrf_hash": session.csrf_hash,
-        "created_at": session.created_at,
-        "idle_expires_at": session.idle_expires_at,
-        "absolute_expires_at": session.absolute_expires_at,
-        "authenticated_at": session.authenticated_at,
-        "used_at": session.used_at,
-        "revoked_at": session.revoked_at,
-        "replaced_by_id": session.replaced_by_id,
-    }
+    async def count_passkeys(self, user_id: UUID) -> int:
+        statement = (
+            select(func.count())
+            .select_from(passkey_credential)
+            .where(
+                passkey_credential.c.user_id == user_id,
+                passkey_credential.c.revoked_at.is_(None),
+            )
+        )
+        result = await self.connection.scalar(statement)
+        return int(result or 0)
 
+    async def list_passkeys(self, user_id: UUID) -> Sequence[PasskeyCredential]:
+        statement = (
+            select(passkey_credential)
+            .where(
+                passkey_credential.c.user_id == user_id,
+                passkey_credential.c.revoked_at.is_(None),
+            )
+            .order_by(passkey_credential.c.created_at, passkey_credential.c.id)
+        )
+        rows = (await self.connection.execute(statement)).mappings().all()
+        return tuple(passkey_from_row(row) for row in rows)
 
-def _user(row: RowMapping) -> UserAccount:
-    return UserAccount(
-        id=row["id"],
-        email=row["email"],
-        display_name=row["display_name"],
-        password_hash=row["password_hash"],
-        status=UserStatus(row["status"]),
-        roles=tuple(row["roles"] or ()),
-        scopes=tuple(row["scopes"] or ()),
-        must_change_password=row["must_change_password"],
-        failed_login_attempts=row["failed_login_attempts"],
-        locked_until=row["locked_until"],
-        password_changed_at=row["password_changed_at"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
+    async def get_passkey_by_id(
+        self,
+        passkey_id: UUID,
+        user_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> PasskeyCredential | None:
+        statement = select(passkey_credential).where(
+            passkey_credential.c.id == passkey_id,
+            passkey_credential.c.user_id == user_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        row = (await self.connection.execute(statement)).mappings().first()
+        return passkey_from_row(row) if row else None
 
+    async def get_passkey_by_credential_id(
+        self,
+        credential_id: bytes,
+        *,
+        for_update: bool = False,
+    ) -> PasskeyCredential | None:
+        statement = select(passkey_credential).where(
+            passkey_credential.c.credential_id == credential_id
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        row = (await self.connection.execute(statement)).mappings().first()
+        return passkey_from_row(row) if row else None
 
-def _session(row: RowMapping) -> RefreshSession:
-    return RefreshSession(
-        id=row["id"],
-        user_id=row["user_id"],
-        family_id=row["family_id"],
-        token_hash=row["token_hash"],
-        csrf_hash=row["csrf_hash"],
-        created_at=row["created_at"],
-        idle_expires_at=row["idle_expires_at"],
-        absolute_expires_at=row["absolute_expires_at"],
-        authenticated_at=row["authenticated_at"],
-        used_at=row["used_at"],
-        revoked_at=row["revoked_at"],
-        replaced_by_id=row["replaced_by_id"],
-    )
+    async def insert_passkey(self, credential: PasskeyCredential) -> None:
+        try:
+            await self.connection.execute(
+                insert(passkey_credential).values(passkey_values(credential))
+            )
+        except IntegrityError as error:
+            raise StoreConflictError("passkey uniqueness constraint failed") from error
+
+    async def update_passkey(self, credential: PasskeyCredential) -> None:
+        try:
+            result = await self.connection.execute(
+                update(passkey_credential)
+                .where(passkey_credential.c.id == credential.id)
+                .values(passkey_values(credential))
+            )
+        except IntegrityError as error:
+            raise StoreConflictError("passkey update constraint failed") from error
+        if result.rowcount != 1:
+            raise KeyError(credential.id)
 
 
 def async_psycopg_url(url: str) -> str:

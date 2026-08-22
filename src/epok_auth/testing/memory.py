@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import copy
 from collections.abc import AsyncGenerator, Sequence
@@ -9,7 +7,13 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from epok_auth.models import RefreshSession, SecurityEvent, UserAccount, UserStatus
-from epok_auth.store import AuthTransaction, StoreConflictError
+from epok_auth.passkeys.models import (
+    PasskeyCeremonyPurpose,
+    PasskeyChallenge,
+    PasskeyCredential,
+)
+from epok_auth.passkeys.store import PasskeyTransaction
+from epok_auth.store import StoreConflictError
 
 
 class MemoryAuthStore:
@@ -18,17 +22,33 @@ class MemoryAuthStore:
     def __init__(self) -> None:
         self.users: dict[UUID, UserAccount] = {}
         self.sessions: dict[UUID, RefreshSession] = {}
+        self.passkeys: dict[UUID, PasskeyCredential] = {}
+        self.passkey_challenges: dict[UUID, PasskeyChallenge] = {}
         self.events: list[SecurityEvent] = []
         self._lock = asyncio.Lock()
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncGenerator[AuthTransaction, None]:
+    async def transaction(self) -> AsyncGenerator[PasskeyTransaction, None]:
         async with self._lock:
-            snapshot = copy.deepcopy((self.users, self.sessions, self.events))
+            snapshot = copy.deepcopy(
+                (
+                    self.users,
+                    self.sessions,
+                    self.passkeys,
+                    self.passkey_challenges,
+                    self.events,
+                )
+            )
             try:
                 yield _MemoryTransaction(self)
             except BaseException:
-                self.users, self.sessions, self.events = snapshot
+                (
+                    self.users,
+                    self.sessions,
+                    self.passkeys,
+                    self.passkey_challenges,
+                    self.events,
+                ) = snapshot
                 raise
 
 
@@ -143,3 +163,99 @@ class _MemoryTransaction:
 
     async def add_security_event(self, event: SecurityEvent) -> None:
         self.store.events.append(event)
+
+    async def delete_expired_passkey_challenges(self, now: datetime) -> int:
+        expired = [
+            challenge_id
+            for challenge_id, challenge in self.store.passkey_challenges.items()
+            if challenge.expires_at <= now
+        ]
+        for challenge_id in expired:
+            del self.store.passkey_challenges[challenge_id]
+        return len(expired)
+
+    async def insert_passkey_challenge(self, challenge: PasskeyChallenge) -> None:
+        duplicate = challenge.id in self.store.passkey_challenges or any(
+            existing.challenge == challenge.challenge
+            for existing in self.store.passkey_challenges.values()
+        )
+        if duplicate:
+            raise StoreConflictError("passkey challenge already exists")
+        self.store.passkey_challenges[challenge.id] = challenge
+
+    async def consume_passkey_challenge(
+        self,
+        challenge_id: UUID,
+        purpose: PasskeyCeremonyPurpose,
+        now: datetime,
+        user_id: UUID | None,
+    ) -> PasskeyChallenge | None:
+        challenge = self.store.passkey_challenges.get(challenge_id)
+        if (
+            challenge is None
+            or challenge.purpose is not purpose
+            or challenge.user_id != user_id
+            or challenge.consumed_at is not None
+            or challenge.expires_at <= now
+        ):
+            return None
+        consumed = replace(challenge, consumed_at=now)
+        self.store.passkey_challenges[challenge_id] = consumed
+        return consumed
+
+    async def count_passkeys(self, user_id: UUID) -> int:
+        return sum(
+            credential.user_id == user_id and credential.revoked_at is None
+            for credential in self.store.passkeys.values()
+        )
+
+    async def list_passkeys(self, user_id: UUID) -> Sequence[PasskeyCredential]:
+        credentials = (
+            credential
+            for credential in self.store.passkeys.values()
+            if credential.user_id == user_id and credential.revoked_at is None
+        )
+        return tuple(sorted(credentials, key=lambda item: (item.created_at, str(item.id))))
+
+    async def get_passkey_by_id(
+        self,
+        passkey_id: UUID,
+        user_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> PasskeyCredential | None:
+        del for_update
+        credential = self.store.passkeys.get(passkey_id)
+        if credential is None or credential.user_id != user_id:
+            return None
+        return credential
+
+    async def get_passkey_by_credential_id(
+        self,
+        credential_id: bytes,
+        *,
+        for_update: bool = False,
+    ) -> PasskeyCredential | None:
+        del for_update
+        return next(
+            (
+                credential
+                for credential in self.store.passkeys.values()
+                if credential.credential_id == credential_id
+            ),
+            None,
+        )
+
+    async def insert_passkey(self, credential: PasskeyCredential) -> None:
+        duplicate = credential.id in self.store.passkeys or any(
+            existing.credential_id == credential.credential_id
+            for existing in self.store.passkeys.values()
+        )
+        if duplicate:
+            raise StoreConflictError("passkey already exists")
+        self.store.passkeys[credential.id] = credential
+
+    async def update_passkey(self, credential: PasskeyCredential) -> None:
+        if credential.id not in self.store.passkeys:
+            raise KeyError(credential.id)
+        self.store.passkeys[credential.id] = credential

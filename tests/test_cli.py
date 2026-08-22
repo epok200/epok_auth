@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+from typing import Self
 from unittest.mock import Mock
 
 import pytest
@@ -139,7 +138,7 @@ async def test_create_admin_closes_store(monkeypatch: pytest.MonkeyPatch) -> Non
 
     class StoreFactory:
         @classmethod
-        def from_url(cls, url: str) -> Store:
+        def from_url(cls, url: str) -> Self:
             assert url == "postgresql://user:pass@db/tests"
             return Store()
 

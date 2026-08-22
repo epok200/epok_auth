@@ -1,7 +1,6 @@
 # pyright: reportUnusedFunction=false
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Self, cast
 from uuid import UUID
 
 from fastapi import (
@@ -21,7 +20,10 @@ from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from epok_auth.config import AuthSettings
-from epok_auth.errors import AuthError, AuthErrorCode
+from epok_auth.errores import AuthError, AuthErrorCode, invalid_session
+from epok_auth.errores.handler import registrar
+from epok_auth.errores.http import error_response
+from epok_auth.fastapi.passkeys import create_passkey_router
 from epok_auth.fastapi.schemas import (
     ChangePasswordRequest,
     CreateUserRequest,
@@ -35,7 +37,10 @@ from epok_auth.fastapi.schemas import (
     UserListResponse,
     UserResponse,
 )
-from epok_auth.models import Principal, RequestContext, SessionBundle, UserUpdate
+from epok_auth.fastapi.transport import AuthHttpTransport
+from epok_auth.models import Principal, UserUpdate
+from epok_auth.passkeys.service import PasskeyService
+from epok_auth.passkeys.store import PasskeyStore
 from epok_auth.service import AuthService
 from epok_auth.store import AuthStore
 
@@ -53,10 +58,13 @@ class EpokAuth:
         settings: AuthSettings,
         store: AuthStore,
         service: AuthService | None = None,
+        passkeys: PasskeyService | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
         self.service = service or AuthService(store=store, settings=settings)
+        self.passkeys = passkeys
+        self._http = AuthHttpTransport(settings)
         self._prefixes: set[str] = set()
 
     @classmethod
@@ -86,15 +94,26 @@ class EpokAuth:
         *,
         prefix: str = "/auth",
         include_admin: bool = False,
+        include_passkeys: bool = False,
         admin_prefix: str = "/users",
     ) -> None:
         normalized_prefix = "/" + prefix.strip("/")
-        self._prefixes.add(normalized_prefix)
-        app.include_router(self.router(prefix=normalized_prefix))
+        auth_router = self.router(prefix=normalized_prefix)
+        admin_router = None
         if include_admin:
-            app.include_router(
-                self.admin_router(prefix=normalized_prefix + "/" + admin_prefix.strip("/"))
+            admin_router = self.admin_router(
+                prefix=normalized_prefix + "/" + admin_prefix.strip("/")
             )
+        passkey_router = None
+        if include_passkeys:
+            passkey_router = self.passkey_router(prefix=normalized_prefix + "/passkeys")
+
+        self._prefixes.add(normalized_prefix)
+        app.include_router(auth_router)
+        if admin_router is not None:
+            app.include_router(admin_router)
+        if passkey_router is not None:
+            app.include_router(passkey_router)
         if not getattr(app.state, "_epok_auth_handlers_installed", False):
             app.add_exception_handler(AuthError, self._auth_error_handler)  # type: ignore[arg-type]
             app.add_exception_handler(RequestValidationError, self._validation_error_handler)  # type: ignore[arg-type]
@@ -118,10 +137,10 @@ class EpokAuth:
             bundle = await self.service.login(
                 payload.email,
                 payload.password,
-                context=self._request_context(request),
+                context=self._http.request_context(request),
             )
-            self._set_session_cookies(response, bundle)
-            self._disable_cache(response)
+            self._http.set_session_cookies(response, bundle)
+            self._http.disable_cache(response)
             return SessionResponse.from_bundle(bundle)
 
         @router.post(
@@ -151,10 +170,10 @@ class EpokAuth:
                 csrf_cookie or "",
                 csrf_header or "",
                 origin=origin,
-                context=self._request_context(request),
+                context=self._http.request_context(request),
             )
-            self._set_session_cookies(response, bundle)
-            self._disable_cache(response)
+            self._http.set_session_cookies(response, bundle)
+            self._http.disable_cache(response)
             return SessionResponse.from_bundle(bundle)
 
         @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -179,11 +198,11 @@ class EpokAuth:
                 csrf_cookie,
                 csrf_header,
                 origin=origin,
-                context=self._request_context(request),
+                context=self._http.request_context(request),
             )
             response = Response(status_code=status.HTTP_204_NO_CONTENT)
-            self._delete_session_cookies(response)
-            self._disable_cache(response)
+            self._http.delete_session_cookies(response)
+            self._http.disable_cache(response)
             return response
 
         @router.get("/me", response_model=PrincipalResponse)
@@ -205,10 +224,10 @@ class EpokAuth:
                 principal,
                 payload.current_password,
                 payload.new_password,
-                context=self._request_context(request),
+                context=self._http.request_context(request),
             )
-            self._set_session_cookies(response, bundle)
-            self._disable_cache(response)
+            self._http.set_session_cookies(response, bundle)
+            self._http.disable_cache(response)
             return SessionResponse.from_bundle(bundle)
 
         return router
@@ -243,7 +262,7 @@ class EpokAuth:
                 display_name=payload.display_name,
                 roles=payload.roles,
                 scopes=payload.scopes,
-                context=self._request_context(request),
+                context=self._http.request_context(request),
             )
             return ProvisionedUserResponse.from_result(result)
 
@@ -265,7 +284,7 @@ class EpokAuth:
                     roles=tuple(payload.roles) if payload.roles is not None else None,
                     scopes=tuple(payload.scopes) if payload.scopes is not None else None,
                 ),
-                context=self._request_context(request),
+                context=self._http.request_context(request),
             )
             return UserResponse.from_user(user)
 
@@ -274,7 +293,7 @@ class EpokAuth:
             return ProvisionedUserResponse.from_result(
                 await self.service.reset_password(
                     user_id,
-                    context=self._request_context(request),
+                    context=self._http.request_context(request),
                 )
             )
 
@@ -282,11 +301,21 @@ class EpokAuth:
         async def revoke_sessions(user_id: UUID, request: Request) -> RevocationResponse:
             count = await self.service.revoke_user_sessions(
                 user_id,
-                context=self._request_context(request),
+                context=self._http.request_context(request),
             )
             return RevocationResponse(revoked_sessions=count)
 
         return router
+
+    def passkey_router(self, *, prefix: str = "/auth/passkeys") -> APIRouter:
+        return create_passkey_router(
+            service=self._passkey_service(),
+            principal_dependency=self.authenticated,
+            set_session_cookies=self._http.set_session_cookies,
+            request_context=self._http.request_context,
+            disable_cache=self._http.disable_cache,
+            prefix=prefix,
+        )
 
     async def current_user(
         self,
@@ -318,8 +347,6 @@ class EpokAuth:
         credentials: HTTPAuthorizationCredentials | None,
     ) -> Principal:
         if credentials is None or credentials.scheme.casefold() != "bearer":
-            from epok_auth.errors import invalid_session
-
             raise invalid_session()
         return await self.service.authenticate(credentials.credentials)
 
@@ -362,18 +389,37 @@ class EpokAuth:
         dependencies.append(Depends(self.authenticated))
         return APIRouter(dependencies=dependencies, **kwargs)
 
+    def _passkey_service(self) -> PasskeyService:
+        if self.passkeys is not None:
+            return self.passkeys
+        try:
+            from epok_auth.passkeys.webauthn import WebAuthnAdapter
+        except ImportError as error:
+            raise RuntimeError(
+                'Passkeys require the optional dependency: uv add "epok-auth[passkeys]"'
+            ) from error
+        settings = self.settings
+        if settings.passkey_rp_id is None:
+            raise ValueError("passkey_rp_id is required when passkeys are enabled")
+        adapter = WebAuthnAdapter(
+            rp_id=settings.passkey_rp_id,
+            rp_name=settings.effective_passkey_rp_name,
+            timeout_ms=settings.passkey_timeout_ms,
+        )
+        self.passkeys = PasskeyService(
+            store=cast(PasskeyStore, self.store),
+            settings=settings,
+            signer=self.service.signer,
+            adapter=adapter,
+            clock=self.service.clock,
+        )
+        return self.passkeys
+
     async def _auth_error_handler(self, request: Request, error: AuthError) -> JSONResponse:
         request_id = getattr(request.state, "request_id", None)
-        response = JSONResponse(
-            status_code=error.status_code,
-            content={
-                "code": error.code.value,
-                "detail": error.detail,
-                "request_id": request_id,
-            },
-            headers=error.headers,
-        )
-        self._disable_cache(response)
+        registrar(error, contexto=request.url.path)
+        response = error_response(error, request_id)
+        self._http.disable_cache(response)
         return response
 
     async def _validation_error_handler(
@@ -390,74 +436,8 @@ class EpokAuth:
                     "request_id": getattr(request.state, "request_id", None),
                 },
             )
-            self._disable_cache(response)
+            self._http.disable_cache(response)
             return response
         from fastapi.exception_handlers import request_validation_exception_handler
 
         return await request_validation_exception_handler(request, error)
-
-    def _set_session_cookies(self, response: Response, bundle: SessionBundle) -> None:
-        now = datetime.now(UTC)
-        max_age = max(
-            0,
-            int(
-                min(bundle.refresh_idle_expires_at, bundle.refresh_absolute_expires_at).timestamp()
-                - now.timestamp()
-            ),
-        )
-        common: dict[str, Any] = {
-            "max_age": max_age,
-            "expires": bundle.refresh_absolute_expires_at,
-            "path": self.settings.cookie_path,
-            "domain": self.settings.cookie_domain,
-            "secure": self.settings.secure_cookies,
-            "samesite": self.settings.cookie_same_site,
-        }
-        response.set_cookie(
-            self.settings.effective_refresh_cookie_name,
-            bundle.refresh_token,
-            httponly=True,
-            **common,
-        )
-        response.set_cookie(
-            self.settings.effective_csrf_cookie_name,
-            bundle.csrf_token,
-            httponly=self.settings.csrf_cookie_http_only,
-            **common,
-        )
-
-    def _delete_session_cookies(self, response: Response) -> None:
-        response.delete_cookie(
-            self.settings.effective_refresh_cookie_name,
-            path=self.settings.cookie_path,
-            domain=self.settings.cookie_domain,
-            secure=self.settings.secure_cookies,
-            httponly=True,
-            samesite=self.settings.cookie_same_site,
-        )
-        response.delete_cookie(
-            self.settings.effective_csrf_cookie_name,
-            path=self.settings.cookie_path,
-            domain=self.settings.cookie_domain,
-            secure=self.settings.secure_cookies,
-            httponly=self.settings.csrf_cookie_http_only,
-            samesite=self.settings.cookie_same_site,
-        )
-
-    @staticmethod
-    def _disable_cache(response: Response) -> None:
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Pragma"] = "no-cache"
-
-    @staticmethod
-    def _request_context(request: Request) -> RequestContext:
-        forwarded = request.headers.get("x-forwarded-for")
-        ip_address = forwarded.split(",", 1)[0].strip() if forwarded else None
-        if ip_address is None and request.client is not None:
-            ip_address = request.client.host
-        return RequestContext(
-            request_id=getattr(request.state, "request_id", None)
-            or request.headers.get("x-request-id"),
-            ip_address=ip_address,
-            user_agent=request.headers.get("user-agent"),
-        )

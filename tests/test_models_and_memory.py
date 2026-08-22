@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -10,9 +8,11 @@ from epok_auth.errors import AuthError, AuthErrorCode, forbidden, invalid_csrf, 
 from epok_auth.models import (
     Principal,
     RefreshSession,
+    RequestContext,
     SecurityEvent,
     SecurityEventType,
     UserAccount,
+    UserStatus,
 )
 from epok_auth.store import StoreConflictError
 from epok_auth.testing import MemoryAuthStore
@@ -67,6 +67,35 @@ def test_principal_capability_helpers() -> None:
     assert principal.has_role("editor")
     assert not principal.has_role("admin")
     assert principal.has_scope("catalog:read")
+
+
+def test_user_authentication_policy_is_owned_by_the_user_model() -> None:
+    account = user()
+
+    assert account.can_authenticate(NOW)
+    assert not replace(account, status=UserStatus.DISABLED).can_authenticate(NOW)
+    assert not replace(account, locked_until=NOW + timedelta(seconds=1)).can_authenticate(NOW)
+    assert replace(account, locked_until=NOW).can_authenticate(NOW)
+
+
+def test_security_event_factory_bounds_untrusted_request_metadata() -> None:
+    metadata = {"reason": "invalid"}
+    event = SecurityEvent.from_request(
+        SecurityEventType.LOGIN_FAILED,
+        NOW,
+        context=RequestContext(
+            request_id="r" * 201,
+            ip_address="i" * 65,
+            user_agent="u" * 501,
+        ),
+        metadata=metadata,
+    )
+    metadata["reason"] = "changed"
+
+    assert event.request_id == "r" * 200
+    assert event.ip_address == "i" * 64
+    assert event.user_agent == "u" * 500
+    assert event.metadata == {"reason": "invalid"}
 
 
 @pytest.mark.asyncio

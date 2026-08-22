@@ -1,13 +1,13 @@
 [project]
 name = "epok-auth"
-version = "0.1.0"
-description = "FastAPI-first authentication with PostgreSQL-authoritative, revocable sessions."
+version = "0.2.0"
+description = "FastAPI authentication with revocable PostgreSQL sessions and WebAuthn passkeys."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "EPOK" }]
-keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql"]
+keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql", "passkeys", "webauthn"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Framework :: FastAPI",
@@ -36,14 +36,20 @@ dependencies = [
 postgres = [
   "alembic>=1.17,<2",
   "greenlet>=3.0,<4",
+  "Mako>=1.3,<1.4",
   "psycopg[binary,pool]>=3.2,<4",
   "SQLAlchemy>=2.0.45,<2.1",
 ]
 all = [
   "alembic>=1.17,<2",
   "greenlet>=3.0,<4",
+  "Mako>=1.3,<1.4",
   "psycopg[binary,pool]>=3.2,<4",
   "SQLAlchemy>=2.0.45,<2.1",
+  "webauthn>=3.0,<4",
+]
+passkeys = [
+  "webauthn>=3.0,<4",
 ]
 
 [project.scripts]
@@ -64,6 +70,9 @@ build-backend = "hatchling.build"
 packages = ["src/epok_auth"]
 include = ["src/epok_auth/py.typed", "src/epok_auth/migrations/**/*"]
 
+[tool.hatch.build.targets.sdist]
+only-include = ["src/epok_auth"]
+
 [dependency-groups]
 dev = [
   "httpx>=0.28,<1",
@@ -73,6 +82,7 @@ dev = [
   "pytest-asyncio>=0.25,<2",
   "pytest-cov>=6,<8",
   "ruff>=0.12,<1",
+  "uvicorn>=0.52,<0.53",
 ]
 
 [tool.pytest.ini_options]
@@ -110,13 +120,17 @@ ignore = ["PLR0913", "PLR2004", "S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/**/*.py" = ["B008"]
+"examples/passkeys/e2e_server.py" = ["B008", "S105"]
 "tests/**/*.py" = ["B008", "PLC0415", "S105", "S106", "S107", "PLR2004"]
+"tests/test_errors.py" = ["S301", "S403"]
 "tests/test_postgres_integration.py" = ["E402"]
 "tests/test_tokens.py" = ["DTZ001"]
 "scripts/publish.py" = ["PLR0912", "PLR0915", "S105", "S404"]
+"scripts/release_support.py" = ["S105"]
 "src/epok_auth/cli.py" = ["PLC0415", "T201"]
 "src/epok_auth/config.py" = ["PLR0912"]
-"src/epok_auth/errors.py" = ["S105"]
+"src/epok_auth/errores/catalogo.py" = ["S105"]
+"src/epok_auth/errores/excepcion.py" = ["PLC0415"]
 "src/epok_auth/fastapi/integration.py" = ["FAST001", "PLC0415", "PLR0917"]
 "src/epok_auth/fastapi/schemas.py" = ["S105"]
 "src/epok_auth/models.py" = ["S105"]
