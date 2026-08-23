@@ -32,6 +32,8 @@ user_account = Table(
     Column("roles", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("scopes", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("must_change_password", Boolean, nullable=False, server_default=text("false")),
+    Column("password_login_enabled", Boolean, nullable=False, server_default=text("true")),
+    Column("google_auto_link_allowed", Boolean, nullable=False, server_default=text("false")),
     Column("failed_login_attempts", Integer, nullable=False, server_default="0"),
     Column("locked_until", DateTime(timezone=True)),
     Column("password_changed_at", DateTime(timezone=True)),
@@ -215,4 +217,76 @@ passkey_challenge = Table(
         name="ck_epok_auth_passkey_challenge_user",
     ),
     Index("ix_epok_auth_passkey_challenge_expiry", "expires_at"),
+)
+
+external_identity = Table(
+    "external_identity",
+    metadata,
+    Column("id", Uuid(as_uuid=True), primary_key=True),
+    Column(
+        "user_id",
+        Uuid(as_uuid=True),
+        ForeignKey("user_account.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("issuer", Text, nullable=False),
+    Column("subject", Text, nullable=False),
+    Column("email", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("last_login_at", DateTime(timezone=True)),
+    UniqueConstraint("issuer", "subject", name="uq_epok_auth_external_identity_subject"),
+    UniqueConstraint("user_id", "issuer", name="uq_epok_auth_external_identity_user_issuer"),
+    CheckConstraint(
+        "length(issuer) BETWEEN 1 AND 255 AND length(subject) BETWEEN 1 AND 255",
+        name="ck_epok_auth_external_identity_keys",
+    ),
+    CheckConstraint(
+        "email IS NULL OR length(email) BETWEEN 3 AND 320",
+        name="ck_epok_auth_external_identity_email",
+    ),
+    CheckConstraint(
+        "last_login_at IS NULL OR last_login_at >= created_at",
+        name="ck_epok_auth_external_identity_times",
+    ),
+    Index("ix_epok_auth_external_identity_user", "user_id"),
+)
+
+google_challenge = Table(
+    "google_challenge",
+    metadata,
+    Column("id", Uuid(as_uuid=True), primary_key=True),
+    Column("purpose", Text, nullable=False),
+    Column("nonce", Text, nullable=False),
+    Column("origin", Text, nullable=False),
+    Column("client_id", Text, nullable=False),
+    Column(
+        "user_id",
+        Uuid(as_uuid=True),
+        ForeignKey("user_account.id", ondelete="CASCADE"),
+    ),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("consumed_at", DateTime(timezone=True)),
+    UniqueConstraint("nonce", name="uq_epok_auth_google_challenge_nonce"),
+    CheckConstraint(
+        "purpose IN ('login', 'link')",
+        name="ck_epok_auth_google_challenge_purpose",
+    ),
+    CheckConstraint(
+        "length(nonce) BETWEEN 32 AND 255",
+        name="ck_epok_auth_google_challenge_nonce",
+    ),
+    CheckConstraint(
+        "length(origin) BETWEEN 1 AND 2048 AND length(client_id) BETWEEN 20 AND 255",
+        name="ck_epok_auth_google_challenge_context",
+    ),
+    CheckConstraint(
+        "created_at < expires_at AND (consumed_at IS NULL OR consumed_at >= created_at)",
+        name="ck_epok_auth_google_challenge_times",
+    ),
+    CheckConstraint(
+        "(purpose = 'login' AND user_id IS NULL) OR (purpose = 'link' AND user_id IS NOT NULL)",
+        name="ck_epok_auth_google_challenge_user",
+    ),
+    Index("ix_epok_auth_google_challenge_expiry", "expires_at"),
 )

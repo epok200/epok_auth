@@ -44,11 +44,13 @@ class SessionServiceMethods(AuthServiceBase):
             verification = await asyncio.to_thread(
                 self.passwords.verify_for_login,
                 password,
-                user.password_hash if user else None,
+                user.password_hash if user and user.password_login_enabled else None,
             )
-            unavailable = user is None or not user.can_authenticate(now)
+            unavailable = (
+                user is None or not user.password_login_enabled or not user.can_authenticate(now)
+            )
             if unavailable or not verification.valid:
-                if user is not None and user.can_authenticate(now):
+                if user is not None and user.password_login_enabled and user.can_authenticate(now):
                     previous_attempts = (
                         0
                         if user.locked_until and user.locked_until <= now
@@ -149,32 +151,37 @@ class SessionServiceMethods(AuthServiceBase):
         now = self._now()
         failure: AuthError | None = None
         result: SessionBundle | None = None
+        refresh_hash = token_hash(refresh_token)
         async with self.store.transaction() as transaction:
-            session = await transaction.get_session_by_token_hash(
-                token_hash(refresh_token),
-                for_update=True,
-            )
-            if session is None or session.revoked_at is not None:
+            candidate = await transaction.get_session_by_token_hash(refresh_hash)
+            if candidate is None:
                 failure = invalid_session()
-            elif session.used_at is not None:
-                await transaction.revoke_family(session.family_id, revoked_at=now)
-                await self._event(
-                    transaction,
-                    SecurityEventType.REFRESH_REUSE_DETECTED,
-                    now=now,
-                    user_id=session.user_id,
-                    session_id=session.id,
-                    context=context,
-                )
-                failure = invalid_session()
-            elif session.idle_expires_at <= now or session.absolute_expires_at <= now:
-                await transaction.revoke_family(session.family_id, revoked_at=now)
-                failure = invalid_session()
-            elif not secure_token_equals(session.csrf_hash, token_hash(csrf_cookie)):
-                failure = invalid_csrf()
             else:
-                user = await transaction.get_user_by_id(session.user_id, for_update=True)
-                if user is None or not user.can_authenticate(now):
+                user = await transaction.get_user_by_id(candidate.user_id, for_update=True)
+                session = await transaction.get_session_by_id(candidate.id, for_update=True)
+                if (
+                    session is None
+                    or not secure_token_equals(session.token_hash, refresh_hash)
+                    or session.revoked_at is not None
+                ):
+                    failure = invalid_session()
+                elif session.used_at is not None:
+                    await transaction.revoke_family(session.family_id, revoked_at=now)
+                    await self._event(
+                        transaction,
+                        SecurityEventType.REFRESH_REUSE_DETECTED,
+                        now=now,
+                        user_id=session.user_id,
+                        session_id=session.id,
+                        context=context,
+                    )
+                    failure = invalid_session()
+                elif session.idle_expires_at <= now or session.absolute_expires_at <= now:
+                    await transaction.revoke_family(session.family_id, revoked_at=now)
+                    failure = invalid_session()
+                elif not secure_token_equals(session.csrf_hash, token_hash(csrf_cookie)):
+                    failure = invalid_csrf()
+                elif user is None or not user.can_authenticate(now):
                     await transaction.revoke_family(session.family_id, revoked_at=now)
                     failure = invalid_session()
                 else:
@@ -290,6 +297,8 @@ class SessionServiceMethods(AuthServiceBase):
                 user,
                 password_hash=password_hash,
                 must_change_password=False,
+                password_login_enabled=True,
+                google_auto_link_allowed=False,
                 failed_login_attempts=0,
                 locked_until=None,
                 password_changed_at=now,

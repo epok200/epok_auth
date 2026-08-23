@@ -26,11 +26,17 @@ STATUS_HTTP = {
     AuthErrorCode.PASSKEY_NOT_FOUND: 404,
     AuthErrorCode.PASSKEY_LIMIT_REACHED: 409,
     AuthErrorCode.PASSKEY_NAME_INVALID: 422,
+    AuthErrorCode.GOOGLE_CHALLENGE_INVALID: 400,
+    AuthErrorCode.GOOGLE_CREDENTIAL_INVALID: 401,
+    AuthErrorCode.GOOGLE_IDENTITY_CONFLICT: 409,
+    AuthErrorCode.GOOGLE_IDENTITY_NOT_FOUND: 404,
+    AuthErrorCode.GOOGLE_SERVICE_UNAVAILABLE: 503,
 }
 
 HEADERS_HTTP = {
     AuthErrorCode.INVALID_CREDENTIALS: {"WWW-Authenticate": "Bearer"},
     AuthErrorCode.INVALID_TOKEN: {"WWW-Authenticate": "Bearer"},
+    AuthErrorCode.GOOGLE_CREDENTIAL_INVALID: {"WWW-Authenticate": "Google-ID-Token"},
 }
 
 

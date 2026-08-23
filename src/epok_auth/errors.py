@@ -5,8 +5,10 @@ from epok_auth.errores import (
     CodigoError,
     Severidad,
     forbidden,
+    google_identity_conflict,
     invalid_credentials,
     invalid_csrf,
+    invalid_google_credentials,
     invalid_session,
     registrar,
 )
@@ -18,8 +20,10 @@ __all__ = [
     "CodigoError",
     "Severidad",
     "forbidden",
+    "google_identity_conflict",
     "invalid_credentials",
     "invalid_csrf",
+    "invalid_google_credentials",
     "invalid_session",
     "registrar",
 ]

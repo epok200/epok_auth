@@ -6,7 +6,7 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from epok_auth.config import AuthSettings, Environment
+from epok_auth.config import AuthSettings, Environment, GoogleAccountMode
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.migrate import check_database, downgrade_database, upgrade_database
 from epok_auth.models import UserUpdate
@@ -14,6 +14,7 @@ from epok_auth.passkeys.service import PasskeyService
 from epok_auth.passkeys.webauthn import WebAuthnAdapter
 from epok_auth.postgres import PostgresAuthStore
 from epok_auth.service import AuthService
+from tests.google.fakes import CLIENT_ID
 from tests.passkeys.virtual_authenticator import VirtualAuthenticator, decode_base64url
 
 pytestmark = pytest.mark.integration
@@ -43,6 +44,8 @@ def reset_database(database_url: str) -> Iterator[None]:
         connection.execute(
             """
             TRUNCATE epok_auth.security_event,
+                     epok_auth.google_challenge,
+                     epok_auth.external_identity,
                      epok_auth.passkey_challenge,
                      epok_auth.passkey_credential,
                      epok_auth.refresh_session,
@@ -71,6 +74,8 @@ def settings(database_url: str) -> AuthSettings:
         trusted_origins=(ORIGIN,),
         passkey_rp_id=RP_ID,
         passkey_rp_name="EPOK PostgreSQL tests",
+        google_client_id=CLIENT_ID,
+        google_account_mode=GoogleAccountMode.OPEN,
     )
 
 
@@ -367,6 +372,33 @@ def test_passkey_migration_downgrades_and_upgrades_cleanly(database_url: str) ->
             ).fetchone()[0]
         assert credential_table is None
         assert challenge_table is None
+    finally:
+        upgrade_database(database_url)
+    check_database(database_url)
+
+
+def test_google_migration_downgrades_and_upgrades_cleanly(database_url: str) -> None:
+    try:
+        downgrade_database(database_url, "0002_passkeys")
+        with psycopg.connect(sync_url(database_url)) as connection:
+            identity_table = connection.execute(
+                "SELECT to_regclass('epok_auth.external_identity')"
+            ).fetchone()[0]
+            challenge_table = connection.execute(
+                "SELECT to_regclass('epok_auth.google_challenge')"
+            ).fetchone()[0]
+            columns = connection.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'epok_auth'
+                  AND table_name = 'user_account'
+                  AND column_name IN ('password_login_enabled', 'google_auto_link_allowed')
+                """
+            ).fetchall()
+        assert identity_table is None
+        assert challenge_table is None
+        assert columns == []
     finally:
         upgrade_database(database_url)
     check_database(database_url)

@@ -58,6 +58,12 @@ jobs:
       - name: Browser passkey unit and end-to-end proofs
         working-directory: examples/passkeys
         run: node --test browser.test.mjs browser.e2e.test.mjs
+      - name: Browser Google Sign-In proof
+        working-directory: examples/google
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          node --test browser.e2e.test.mjs
       - name: Dependency vulnerability audit
         run: uv run pip-audit --local --progress-spinner off
 
@@ -195,6 +201,9 @@ jobs:
           test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 1
           python -m zipfile -l "$wheel" | grep 'epok_auth/migrations/versions/0001_initial.py'
           python -m zipfile -l "$wheel" | grep 'epok_auth/migrations/versions/0002_passkeys.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/migrations/versions/0003_google_identity.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/google/service.py'
+          python -m zipfile -l "$wheel" | grep 'epok_auth/google/google_auth.py'
           python -m zipfile -l "$wheel" | grep 'epok_auth/passkeys/service.py'
           python -m zipfile -l "$wheel" | grep 'epok_auth/passkeys/webauthn.py'
           python -m zipfile -l "$wheel" | grep 'epok_auth/errores/excepcion.py'
@@ -202,6 +211,9 @@ jobs:
           python -m zipfile -l "$wheel" | grep 'epok_auth/py.typed'
           tar -tzf "$sdist" | grep 'src/epok_auth/migrations/versions/0001_initial.py'
           tar -tzf "$sdist" | grep 'src/epok_auth/migrations/versions/0002_passkeys.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/migrations/versions/0003_google_identity.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/google/service.py'
+          tar -tzf "$sdist" | grep 'src/epok_auth/google/google_auth.py'
           tar -tzf "$sdist" | grep 'src/epok_auth/passkeys/service.py'
           tar -tzf "$sdist" | grep 'src/epok_auth/passkeys/webauthn.py'
           tar -tzf "$sdist" | grep 'src/epok_auth/errores/excepcion.py'
@@ -249,6 +261,8 @@ jobs:
           assert EpokAuth is not None
           assert epok_auth.PasskeyService is not None
           assert find_spec("webauthn") is None
+          assert epok_auth.GoogleLoginService is not None
+          assert find_spec("google") is None
           assert epok_auth.AuthError is AuthError is AppError
           assert epok_auth.AuthErrorCode is AuthErrorCode is CodigoError
           assert invalid_session().status_code == 401
@@ -260,6 +274,16 @@ jobs:
               assert "epok-auth[passkeys]" in str(error)
           else:
               raise AssertionError("passkeys enabled without the optional dependency")
+          google_settings = AuthSettings.development(
+              google_client_id="123456789-test.apps.googleusercontent.com"
+          )
+          google_auth = EpokAuth(settings=google_settings, store=MemoryAuthStore())
+          try:
+              google_auth.install(FastAPI(), include_google=True)
+          except RuntimeError as error:
+              assert "epok-auth[google]" in str(error)
+          else:
+              raise AssertionError("Google enabled without the optional dependency")
           PY
             "$environment/bin/epok-auth" --help >/dev/null
             "$environment/bin/epok-auth" generate-secret --bytes 32 | grep -E '.{40,}'
@@ -272,13 +296,15 @@ jobs:
             artifact="$1"
             environment="$2"
             uv venv "$environment" --python 3.12
-            uv pip install --python "$environment/bin/python" "${artifact}[postgres,passkeys]"
+            uv pip install --python "$environment/bin/python" "${artifact}[google,postgres,passkeys]"
             "$environment/bin/python" - <<'PY'
           from epok_auth import PasskeyService
+          from epok_auth.google.google_auth import GoogleAuthVerifier
           from epok_auth.passkeys.webauthn import WebAuthnAdapter
           from epok_auth.postgres import PostgresAuthStore
 
           assert PasskeyService is not None
+          assert GoogleAuthVerifier is not None
           assert WebAuthnAdapter is not None
           assert PostgresAuthStore is not None
           PY

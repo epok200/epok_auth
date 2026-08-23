@@ -6,13 +6,18 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
+from epok_auth.google.models import (
+    ExternalIdentity,
+    GoogleChallenge,
+    GoogleChallengePurpose,
+)
+from epok_auth.google.store import GoogleTransaction
 from epok_auth.models import RefreshSession, SecurityEvent, UserAccount, UserStatus
 from epok_auth.passkeys.models import (
     PasskeyCeremonyPurpose,
     PasskeyChallenge,
     PasskeyCredential,
 )
-from epok_auth.passkeys.store import PasskeyTransaction
 from epok_auth.store import StoreConflictError
 
 
@@ -24,11 +29,13 @@ class MemoryAuthStore:
         self.sessions: dict[UUID, RefreshSession] = {}
         self.passkeys: dict[UUID, PasskeyCredential] = {}
         self.passkey_challenges: dict[UUID, PasskeyChallenge] = {}
+        self.external_identities: dict[UUID, ExternalIdentity] = {}
+        self.google_challenges: dict[UUID, GoogleChallenge] = {}
         self.events: list[SecurityEvent] = []
         self._lock = asyncio.Lock()
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncGenerator[PasskeyTransaction, None]:
+    async def transaction(self) -> AsyncGenerator[GoogleTransaction, None]:
         async with self._lock:
             snapshot = copy.deepcopy(
                 (
@@ -36,6 +43,8 @@ class MemoryAuthStore:
                     self.sessions,
                     self.passkeys,
                     self.passkey_challenges,
+                    self.external_identities,
+                    self.google_challenges,
                     self.events,
                 )
             )
@@ -47,6 +56,8 @@ class MemoryAuthStore:
                     self.sessions,
                     self.passkeys,
                     self.passkey_challenges,
+                    self.external_identities,
+                    self.google_challenges,
                     self.events,
                 ) = snapshot
                 raise
@@ -259,3 +270,95 @@ class _MemoryTransaction:
         if credential.id not in self.store.passkeys:
             raise KeyError(credential.id)
         self.store.passkeys[credential.id] = credential
+
+    async def delete_expired_google_challenges(self, now: datetime) -> int:
+        expired = [
+            challenge_id
+            for challenge_id, challenge in self.store.google_challenges.items()
+            if challenge.expires_at <= now
+        ]
+        for challenge_id in expired:
+            del self.store.google_challenges[challenge_id]
+        return len(expired)
+
+    async def insert_google_challenge(self, challenge: GoogleChallenge) -> None:
+        duplicate = challenge.id in self.store.google_challenges or any(
+            existing.nonce == challenge.nonce for existing in self.store.google_challenges.values()
+        )
+        if duplicate:
+            raise StoreConflictError("Google challenge already exists")
+        self.store.google_challenges[challenge.id] = challenge
+
+    async def consume_google_challenge(
+        self,
+        challenge_id: UUID,
+        purpose: GoogleChallengePurpose,
+        now: datetime,
+        user_id: UUID | None,
+    ) -> GoogleChallenge | None:
+        challenge = self.store.google_challenges.get(challenge_id)
+        if (
+            challenge is None
+            or challenge.purpose is not purpose
+            or challenge.user_id != user_id
+            or challenge.consumed_at is not None
+            or challenge.expires_at <= now
+        ):
+            return None
+        consumed = replace(challenge, consumed_at=now)
+        self.store.google_challenges[challenge_id] = consumed
+        return consumed
+
+    async def get_external_identity(
+        self,
+        issuer: str,
+        subject: str,
+        *,
+        for_update: bool = False,
+    ) -> ExternalIdentity | None:
+        del for_update
+        return next(
+            (
+                identity
+                for identity in self.store.external_identities.values()
+                if identity.issuer == issuer and identity.subject == subject
+            ),
+            None,
+        )
+
+    async def get_external_identity_for_user(
+        self,
+        user_id: UUID,
+        issuer: str,
+        *,
+        for_update: bool = False,
+    ) -> ExternalIdentity | None:
+        del for_update
+        return next(
+            (
+                identity
+                for identity in self.store.external_identities.values()
+                if identity.user_id == user_id and identity.issuer == issuer
+            ),
+            None,
+        )
+
+    async def insert_external_identity(self, identity: ExternalIdentity) -> None:
+        duplicate = identity.id in self.store.external_identities or any(
+            (existing.issuer, existing.subject) == (identity.issuer, identity.subject)
+            or (existing.user_id, existing.issuer) == (identity.user_id, identity.issuer)
+            for existing in self.store.external_identities.values()
+        )
+        if duplicate:
+            raise StoreConflictError("external identity already exists")
+        self.store.external_identities[identity.id] = identity
+
+    async def update_external_identity(self, identity: ExternalIdentity) -> None:
+        if identity.id not in self.store.external_identities:
+            raise KeyError(identity.id)
+        self.store.external_identities[identity.id] = identity
+
+    async def delete_external_identity(self, identity_id: UUID) -> None:
+        if identity_id not in self.store.external_identities:
+            raise KeyError(identity_id)
+        del self.store.external_identities[identity_id]

@@ -1,12 +1,18 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie pública de `epok-auth 0.2.1` con lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar cada operación disponible.
+Esta guía documenta la superficie actual del repositorio. `0.2.1` es la versión publicada con
+passkeys; Google Sign-In pertenece al candidato `0.3` todavía no publicado. Aquí encontrarás lo
+mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar
+cada operación disponible.
 
 La ruta recomendada para la primera prueba es usar `AuthSettings`, `EpokAuth.postgres()` y `auth.install()`. Los helpers internos y las clases de persistencia no son necesarios para validar la beta.
 
 Para registrar e iniciar sesión con passkeys, sigue la guía dedicada en
 [`PASSKEYS_ES.md`](PASSKEYS_ES.md). Incluye instalación, configuración, API y un cliente
 de navegador listo para reutilizar.
+
+Para Google Sign-In, políticas de vinculación y recuperación, sigue
+[`GOOGLE_ES.md`](GOOGLE_ES.md).
 
 ## 1. Requisitos
 
@@ -357,7 +363,7 @@ print(settings.effective_csrf_cookie_name)
 
 ## 10. Referencia de `EpokAuth`
 
-### `EpokAuth(settings=..., store=..., service=None, passkeys=None)`
+### `EpokAuth(settings=..., store=..., service=None, passkeys=None, google=None)`
 
 Construye la integración utilizando un store proporcionado manualmente. Se usa principalmente para adaptadores personalizados o pruebas.
 
@@ -398,7 +404,7 @@ auth = EpokAuth.postgres(
 
 ### `auth.install(app, ...)`
 
-Instala las rutas de autenticación, opcionalmente las rutas administrativas, passkeys y los manejadores de errores.
+Instala las rutas de autenticación, opcionalmente las rutas administrativas, passkeys, Google Sign-In y los manejadores de errores.
 
 ```python
 auth.install(
@@ -406,12 +412,14 @@ auth.install(
     prefix="/api/v1/auth",
     include_admin=True,
     include_passkeys=True,
+    include_google=True,
     admin_prefix="/users",
 )
 ```
 
 Para la primera prueba esta es la función recomendada.
 `include_passkeys=True` requiere el extra `passkeys` y `EPOK_AUTH_PASSKEY_RP_ID`.
+`include_google=True` requiere el extra `google` y `EPOK_AUTH_GOOGLE_CLIENT_ID`.
 
 ### `auth.router(prefix=...)`
 

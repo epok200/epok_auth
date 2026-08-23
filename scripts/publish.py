@@ -33,6 +33,7 @@ from release_artifacts import (  # noqa: E402
     publish_arguments,
     verify_public_install,
 )
+from release_browser import run_browser_proofs  # noqa: E402
 from release_support import (  # noqa: E402
     PROJECT_NAME,
     ROOT,
@@ -360,38 +361,7 @@ def _run_quality_and_tests(
             "scripts",
         ),
     )
-    pipeline.run(
-        "Install browser proof dependencies",
-        [context.tools.npm, "ci", "--prefix", "examples/passkeys"],
-    )
-    pipeline.run(
-        "Audit browser proof dependencies",
-        [
-            context.tools.npm,
-            "audit",
-            "--prefix",
-            "examples/passkeys",
-            "--audit-level",
-            "high",
-        ],
-    )
-    pipeline.run(
-        "Install Chromium for the browser proof",
-        [
-            str(ROOT / "examples/passkeys/node_modules/.bin/playwright"),
-            "install",
-            "chromium",
-        ],
-    )
-    pipeline.run(
-        "Browser passkey unit and end-to-end proofs",
-        [
-            context.tools.node,
-            "--test",
-            "examples/passkeys/browser.test.mjs",
-            "examples/passkeys/browser.e2e.test.mjs",
-        ],
-    )
+    run_browser_proofs(pipeline, context)
     pipeline.run(
         "Dependency vulnerability audit",
         _project_run(

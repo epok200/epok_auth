@@ -78,6 +78,7 @@ class UserServiceMethods(AuthServiceBase):
         display_name: str,
         roles: Sequence[str] | None = None,
         scopes: Sequence[str] = (),
+        google_auto_link_allowed: bool = False,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> ProvisionedUser:
         now = self._now()
@@ -96,6 +97,7 @@ class UserServiceMethods(AuthServiceBase):
             roles=normalized_roles,
             scopes=normalized_scopes,
             must_change_password=True,
+            google_auto_link_allowed=google_auto_link_allowed,
             password_changed_at=now,
             created_at=now,
             updated_at=now,
@@ -160,6 +162,11 @@ class UserServiceMethods(AuthServiceBase):
                 if update.display_name is not None
                 else current.display_name
             )
+            google_auto_link_allowed = (
+                update.google_auto_link_allowed
+                if update.google_auto_link_allowed is not None
+                else current.google_auto_link_allowed
+            )
             loses_active_admin = (
                 current.status is UserStatus.ACTIVE
                 and self.settings.admin_role in current.roles
@@ -184,6 +191,7 @@ class UserServiceMethods(AuthServiceBase):
                 status=status,
                 roles=roles,
                 scopes=scopes,
+                google_auto_link_allowed=google_auto_link_allowed,
                 updated_at=now,
             )
             await transaction.update_user(updated)
@@ -222,6 +230,8 @@ class UserServiceMethods(AuthServiceBase):
                 current,
                 password_hash=password_hash,
                 must_change_password=True,
+                password_login_enabled=True,
+                google_auto_link_allowed=False,
                 failed_login_attempts=0,
                 locked_until=None,
                 password_changed_at=now,

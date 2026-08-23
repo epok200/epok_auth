@@ -4,6 +4,7 @@
 
 - password verifiers;
 - passkey public keys, credential identifiers and ceremony challenges;
+- Google external identity links and nonce challenges;
 - active browser sessions;
 - access and refresh credentials;
 - user and role state;
@@ -17,6 +18,8 @@
 3. FastAPI is the authorization enforcement point.
 4. PostgreSQL is authoritative for users and session validity.
 5. Redis, when introduced, is only an optimization and never the authority.
+6. Google certificate and identity claims are an external trust boundary verified by the official
+   backend client.
 
 ## In-scope attackers
 
@@ -26,6 +29,9 @@
 - attacker replaying an already rotated credential;
 - attacker replaying or substituting a WebAuthn ceremony response;
 - attacker presenting a passkey response from another Origin or RP ID;
+- attacker forging, replaying or substituting a Google ID token;
+- attacker attempting to seize an existing local email through Google Sign-In;
+- attacker using an unauthorized Google Workspace domain;
 - malicious cross-site origin;
 - compromised or buggy browser JavaScript;
 - attacker attempting resource exhaustion through credential inputs;
@@ -55,12 +61,22 @@
 | Passkey owner substitution | Discoverable credential `userHandle` must match the stored user UUID |
 | Concurrent passkey registration | User lock, credential uniqueness and transactional per-user limit |
 | Forged forwarding headers | Audit events use the ASGI peer address and never parse client-supplied forwarding headers |
+| Forged Google identity | Official `google-auth` verifier checks signature, issuer, audience and time claims |
+| Google token replay | Random nonce is bound to client ID, Origin and purpose, then consumed atomically once |
+| Local email takeover | Existing emails never auto-link without an explicit administrative flag or recent local session |
+| Open signup receives library admin | Startup rejects `default_user_role == admin_role` in open mode; new scopes are empty |
+| Google subject collision | Unique `(issuer, subject)` and `(user_id, issuer)` database constraints |
+| Untrusted Workspace | Optional `hd` allowlist applies to login, auto-link and explicit link |
+| Google-only password DoS | Password login executes dummy verification but cannot increment lockout state when disabled |
+| Lost Google access | Administrative recovery removes the identity, restores a temporary password and revokes sessions atomically |
+| Recovery races | Link revalidates its persisted session inside the write transaction; recovery, link and refresh use a tested lock order |
 
-## Explicit non-goals in 0.2
+## Explicit non-goals in the current candidate
 
 - attestation trust decisions about authenticator manufacturers;
 - passkeys as an automatic MFA or step-up policy;
 - centralized SSO or identity-provider behavior;
+- generic OIDC providers or access to Google APIs;
 - service-to-service authentication;
 - infrastructure TLS, mTLS, firewall or network configuration;
 - domain-specific authorization;
@@ -73,6 +89,11 @@
 - HS256 requires protecting one symmetric signing secret; asymmetric signing is roadmap work.
 - BFF architecture reduces token exposure but does not make XSS harmless; CSP and frontend hygiene remain required.
 - Public passkey option endpoints still need edge rate limiting against resource exhaustion.
+- Public Google option and verification endpoints still need edge rate limiting.
+- A Google verification outage prevents new Google sessions until certificates can be validated;
+  existing local sessions continue under normal session policy.
+- Incorrect OAuth client Origins or hosted-domain policy can deny legitimate access; configuration
+  rollout must include a recovery administrator.
 - A product must provide recovery before making passkeys its only usable account access path.
 - Deployments behind a proxy must configure trusted proxy addresses in the ASGI server so
   `request.client` is rewritten only for trusted hops.

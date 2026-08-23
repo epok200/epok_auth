@@ -4,7 +4,9 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-> **Status:** the `0.2` series is a public beta on PyPI with WebAuthn passkeys; this source tree builds `0.2.1`. Library publication and product rollout remain separate approvals. Public APIs may still change before `1.0`.
+> **Status:** `0.2.1` is the public beta on PyPI with WebAuthn passkeys. This branch is an
+> unreleased `0.3` candidate that adds Google Sign-In and keeps the existing version until review
+> and release approval. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -25,7 +27,7 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 The repository does not claim that vulnerabilities are impossible. The green gate establishes reproducible evidence for the defined beta threat model and invariants.
 
-## What the beta includes
+## What the source candidate includes
 
 - Argon2id password hashing through `pwdlib`, with rehash support and dummy verification;
 - local users, active/disabled state, roles, scopes, administrative provisioning and reset;
@@ -38,15 +40,24 @@ The repository does not claim that vulnerabilities are impossible. The green gat
 - account lockout, uniform login failures and security-event persistence;
 - plug-and-play FastAPI routers and dependencies;
 - WebAuthn passkey registration, discoverable login, listing and revocation;
+- Google Sign-In with linked-only, preauthorized and open account policies;
 - packaged Alembic migrations and an operational CLI;
 - a Nuxt/Nitro BFF reference where Vue never receives access or refresh tokens.
 
-Google OIDC, TOTP/MFA, Redis coordination, multi-tenancy and service-to-service authentication remain outside this beta. See [ROADMAP.md](ROADMAP.md).
+Generic OIDC providers, TOTP/MFA, Redis coordination, multi-tenancy and service-to-service authentication remain outside this beta. See [ROADMAP.md](ROADMAP.md).
 
 ## Installation
 
+Google Sign-In on an existing adapter:
+
 ```bash
-uv add "epok-auth[postgres,passkeys]==0.2.1"
+uv add "epok-auth[google]"
+```
+
+Complete production stack:
+
+```bash
+uv add "epok-auth[google,postgres,passkeys]"
 ```
 
 Generate a secret and configure the application:
@@ -64,6 +75,8 @@ EPOK_AUTH_AUDIENCE=colors-api
 EPOK_AUTH_TRUSTED_ORIGINS=https://colors.example.com
 EPOK_AUTH_PASSKEY_RP_ID=example.com
 EPOK_AUTH_PASSKEY_RP_NAME=Colors
+EPOK_AUTH_GOOGLE_CLIENT_ID=123456789-example.apps.googleusercontent.com
+EPOK_AUTH_GOOGLE_ACCOUNT_MODE=linked_only
 ```
 
 Production configuration is **fail-closed**: weak secrets, insecure cookies, generic issuer/audience values, missing PostgreSQL, and ambiguous origins prevent startup.
@@ -121,6 +134,7 @@ auth.install(
     prefix="/api/v1/auth",
     include_admin=True,
     include_passkeys=True,
+    include_google=True,
 )
 
 catalog = auth.protected_router(prefix="/api/v1/catalog")
@@ -157,9 +171,14 @@ POST /api/v1/auth/passkeys/authentication/options
 POST /api/v1/auth/passkeys/authentication/verify
 GET  /api/v1/auth/passkeys
 DELETE /api/v1/auth/passkeys/{passkey_id}
+POST /api/v1/auth/google/options
+POST /api/v1/auth/google/verify
+POST /api/v1/auth/google/link/options
+POST /api/v1/auth/google/link/verify
+POST /api/v1/auth/users/{user_id}/google/recover
 ```
 
-With `include_admin=True` it also exposes protected user administration under `/api/v1/auth/users`.
+The recovery route and the rest of user administration appear only with `include_admin=True`.
 
 ## Application boundary
 
@@ -197,6 +216,7 @@ Vue receives only safe user/session state. Access and refresh credentials remain
 - [Development process and quality gates](DEVELOPMENT.md)
 - [Minimal usage and test guide in Spanish](docs/USAGE_ES.md)
 - [Passkeys integration guide in Spanish](docs/PASSKEYS_ES.md)
+- [Google Sign-In integration guide in Spanish](docs/GOOGLE_ES.md)
 - [Publishing and versioning](docs/PUBLISHING.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Security assurance](docs/SECURITY_ASSURANCE.md)

@@ -23,6 +23,7 @@ from epok_auth.config import AuthSettings
 from epok_auth.errores import AuthError, AuthErrorCode, invalid_session
 from epok_auth.errores.handler import registrar
 from epok_auth.errores.http import error_response
+from epok_auth.fastapi.google import create_google_admin_router, create_google_router
 from epok_auth.fastapi.passkeys import create_passkey_router
 from epok_auth.fastapi.schemas import (
     ChangePasswordRequest,
@@ -38,6 +39,8 @@ from epok_auth.fastapi.schemas import (
     UserResponse,
 )
 from epok_auth.fastapi.transport import AuthHttpTransport
+from epok_auth.google.service import GoogleLoginService
+from epok_auth.google.store import GoogleStore
 from epok_auth.models import Principal, UserUpdate
 from epok_auth.passkeys.service import PasskeyService
 from epok_auth.passkeys.store import PasskeyStore
@@ -59,11 +62,13 @@ class EpokAuth:
         store: AuthStore,
         service: AuthService | None = None,
         passkeys: PasskeyService | None = None,
+        google: GoogleLoginService | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
         self.service = service or AuthService(store=store, settings=settings)
         self.passkeys = passkeys
+        self.google = google
         self._http = AuthHttpTransport(settings)
         self._prefixes: set[str] = set()
 
@@ -95,6 +100,7 @@ class EpokAuth:
         prefix: str = "/auth",
         include_admin: bool = False,
         include_passkeys: bool = False,
+        include_google: bool = False,
         admin_prefix: str = "/users",
     ) -> None:
         normalized_prefix = "/" + prefix.strip("/")
@@ -107,6 +113,14 @@ class EpokAuth:
         passkey_router = None
         if include_passkeys:
             passkey_router = self.passkey_router(prefix=normalized_prefix + "/passkeys")
+        google_router = None
+        google_admin_router = None
+        if include_google:
+            google_router = self.google_router(prefix=normalized_prefix + "/google")
+            if include_admin:
+                google_admin_router = self.google_admin_router(
+                    prefix=normalized_prefix + "/" + admin_prefix.strip("/")
+                )
 
         self._prefixes.add(normalized_prefix)
         app.include_router(auth_router)
@@ -114,6 +128,10 @@ class EpokAuth:
             app.include_router(admin_router)
         if passkey_router is not None:
             app.include_router(passkey_router)
+        if google_router is not None:
+            app.include_router(google_router)
+        if google_admin_router is not None:
+            app.include_router(google_admin_router)
         if not getattr(app.state, "_epok_auth_handlers_installed", False):
             app.add_exception_handler(AuthError, self._auth_error_handler)  # type: ignore[arg-type]
             app.add_exception_handler(RequestValidationError, self._validation_error_handler)  # type: ignore[arg-type]
@@ -262,6 +280,7 @@ class EpokAuth:
                 display_name=payload.display_name,
                 roles=payload.roles,
                 scopes=payload.scopes,
+                google_auto_link_allowed=payload.google_auto_link_allowed,
                 context=self._http.request_context(request),
             )
             return ProvisionedUserResponse.from_result(result)
@@ -283,6 +302,7 @@ class EpokAuth:
                     status=payload.status,
                     roles=tuple(payload.roles) if payload.roles is not None else None,
                     scopes=tuple(payload.scopes) if payload.scopes is not None else None,
+                    google_auto_link_allowed=payload.google_auto_link_allowed,
                 ),
                 context=self._http.request_context(request),
             )
@@ -312,6 +332,25 @@ class EpokAuth:
             service=self._passkey_service(),
             principal_dependency=self.authenticated,
             set_session_cookies=self._http.set_session_cookies,
+            request_context=self._http.request_context,
+            disable_cache=self._http.disable_cache,
+            prefix=prefix,
+        )
+
+    def google_router(self, *, prefix: str = "/auth/google") -> APIRouter:
+        return create_google_router(
+            service=self._google_service(),
+            principal_dependency=self.authenticated,
+            set_session_cookies=self._http.set_session_cookies,
+            request_context=self._http.request_context,
+            disable_cache=self._http.disable_cache,
+            prefix=prefix,
+        )
+
+    def google_admin_router(self, *, prefix: str = "/auth/users") -> APIRouter:
+        return create_google_admin_router(
+            service=self._google_service(),
+            admin_dependency=self.require_roles(self.settings.admin_role),
             request_context=self._http.request_context,
             disable_cache=self._http.disable_cache,
             prefix=prefix,
@@ -414,6 +453,27 @@ class EpokAuth:
             clock=self.service.clock,
         )
         return self.passkeys
+
+    def _google_service(self) -> GoogleLoginService:
+        if self.google is not None:
+            return self.google
+        try:
+            from epok_auth.google.google_auth import GoogleAuthVerifier
+        except ImportError as error:
+            raise RuntimeError('Google Sign-In requires: uv add "epok-auth[google]"') from error
+        verifier = GoogleAuthVerifier(
+            timeout_seconds=self.settings.google_token_timeout_seconds,
+            max_credential_chars=self.settings.google_max_credential_chars,
+        )
+        self.google = GoogleLoginService(
+            store=cast(GoogleStore, self.store),
+            settings=self.settings,
+            signer=self.service.signer,
+            verifier=verifier,
+            passwords=self.service.passwords,
+            clock=self.service.clock,
+        )
+        return self.google
 
     async def _auth_error_handler(self, request: Request, error: AuthError) -> JSONResponse:
         request_id = getattr(request.state, "request_id", None)
