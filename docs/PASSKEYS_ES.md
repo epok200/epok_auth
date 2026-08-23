@@ -72,6 +72,22 @@ Si falta el extra o `passkey_rp_id`, la instalación de rutas falla al iniciar c
 mensaje accionable. La instalación base de `epok-auth` sigue funcionando sin importar
 `webauthn`.
 
+## Sandbox local
+
+El repositorio incluye un login visual que ejecuta registro, logout y acceso real con
+passkey sobre una cuenta temporal en memoria. Levántalo con un solo comando:
+
+```bash
+uv run uvicorn examples.passkeys.e2e_server:api_app \
+  --host 127.0.0.1 \
+  --port 8765
+```
+
+Abre `http://localhost:8765` en Chrome y sigue los dos botones. El sandbox no usa
+PostgreSQL, no contiene credenciales reales y pierde su estado al detener el proceso.
+Una passkey guardada por Chrome puede permanecer en el navegador después de reiniciar el
+sandbox; crea una nueva para la siguiente sesión de prueba.
+
 ## API disponible
 
 | Método | Ruta | Autenticación | Propósito |
@@ -115,9 +131,9 @@ Password Manager, una security key o el flujo híbrido disponible. El servidor e
 credenciales discoverable y verificación de usuario.
 
 El repositorio prueba este cliente en dos niveles. El primero aísla la conversión binaria
-y las seis llamadas HTTP con Node. El segundo inicia FastAPI, abre Chromium headless,
-crea una credencial con el autenticador virtual de Chrome, cierra la sesión de contraseña,
-inicia una sesión discoverable y revoca la passkey. CI instala la versión bloqueada de
+y las seis llamadas HTTP con Node. El segundo inicia el sandbox, abre Chromium headless,
+opera sus botones con un autenticador virtual, registra una credencial, cierra la sesión
+de contraseña e inicia una sesión discoverable. CI instala la versión bloqueada de
 Playwright desde `examples/passkeys/package-lock.json` y ejecuta ambos niveles.
 
 Si el frontend y la API usan orígenes distintos, la aplicación consumidora debe
