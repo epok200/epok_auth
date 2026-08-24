@@ -20,6 +20,7 @@ from epok_auth.passkeys.models import (
     PasskeyChallenge,
     PasskeyCredential,
 )
+from epok_auth.postgres._email_links import PostgresEmailLinkMethods
 from epok_auth.postgres._mapping import (
     challenge_from_row,
     challenge_values,
@@ -84,7 +85,7 @@ class PostgresAuthStore:
         await self.engine.dispose()
 
 
-class PostgresAuthTransaction:
+class PostgresAuthTransaction(PostgresEmailLinkMethods):
     def __init__(self, connection: AsyncConnection) -> None:
         self.connection = connection
 

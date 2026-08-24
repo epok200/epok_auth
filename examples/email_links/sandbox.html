@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Magic Link sandbox | epok-auth</title>
+    <style>
+      :root {
+        --paper: #f1ead8;
+        --ink: #e9f4ef;
+        --muted: #91a29b;
+        --line: #2e4139;
+        --night: #07100d;
+        --panel: #101b17;
+        --signal: #d5ff3f;
+        --cyan: #57d8ff;
+        --danger: #ff786f;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: var(--ink);
+        background:
+          linear-gradient(90deg, transparent 49.8%, #18302855 50%, transparent 50.2%),
+          radial-gradient(circle at 14% 10%, #19382d 0, transparent 31rem),
+          var(--night);
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+
+      body::after {
+        position: fixed;
+        inset: 0;
+        content: "";
+        pointer-events: none;
+        opacity: 0.13;
+        background-image: linear-gradient(#8eafa322 1px, transparent 1px);
+        background-size: 100% 32px;
+      }
+
+      main {
+        position: relative;
+        width: min(900px, calc(100% - 36px));
+        margin: 0 auto;
+        padding: 72px 0 56px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: 1fr 170px;
+        gap: 32px;
+        align-items: end;
+        margin-bottom: 42px;
+      }
+
+      .eyebrow, .stamp, label, .result-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow { color: var(--signal); }
+
+      h1, .result-name {
+        margin: 12px 0 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+        font-weight: 700;
+      }
+
+      h1 {
+        max-width: 650px;
+        font-size: clamp(48px, 8vw, 88px);
+        line-height: 0.88;
+        letter-spacing: -0.045em;
+      }
+
+      .stamp {
+        padding: 18px;
+        border: 1px solid var(--signal);
+        color: var(--signal);
+        line-height: 1.65;
+        transform: rotate(2deg);
+      }
+
+      .panel {
+        display: grid;
+        grid-template-columns: 112px 1fr;
+        border: 1px solid var(--line);
+        background: color-mix(in srgb, var(--panel) 94%, transparent);
+        box-shadow: 16px 16px 0 #030805;
+      }
+
+      .number {
+        padding: 30px 24px;
+        border-right: 1px solid var(--line);
+        color: var(--cyan);
+        font: 700 46px/1 "Iowan Old Style", serif;
+      }
+
+      .content { padding: 30px; }
+      .content p { margin: 8px 0 24px; color: var(--muted); line-height: 1.65; }
+      label { display: block; margin-bottom: 8px; color: var(--signal); }
+
+      input {
+        width: 100%;
+        padding: 15px 16px;
+        border: 1px solid var(--line);
+        outline: none;
+        color: var(--ink);
+        background: #07100d;
+        font: inherit;
+      }
+
+      input:focus { border-color: var(--cyan); }
+
+      button {
+        width: 100%;
+        margin-top: 12px;
+        padding: 16px;
+        border: 0;
+        color: #07100d;
+        background: var(--signal);
+        font: 800 12px/1 inherit;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: transform 140ms ease, filter 140ms ease;
+      }
+
+      button:hover { filter: brightness(1.08); transform: translateY(-2px); }
+      button:disabled { cursor: wait; filter: saturate(0.2); }
+
+      #status {
+        margin-top: 26px;
+        padding: 17px 19px;
+        border-left: 3px solid var(--cyan);
+        color: var(--muted);
+        background: #0d1713;
+        line-height: 1.5;
+      }
+
+      #status[data-tone="success"] { border-color: var(--signal); color: var(--signal); }
+      #status[data-tone="error"] { border-color: var(--danger); color: var(--danger); }
+
+      #session-result {
+        margin-top: 18px;
+        padding: 26px;
+        border: 1px solid #657c2b;
+        background: #111b16;
+      }
+
+      .result-label { color: var(--signal); }
+      .result-name { font-size: 32px; }
+      .result-email { margin-top: 4px; color: var(--muted); }
+
+      footer { margin-top: 38px; color: #6e8079; font-size: 11px; line-height: 1.7; }
+
+      @media (max-width: 650px) {
+        main { padding-top: 42px; }
+        header { grid-template-columns: 1fr; }
+        .stamp { width: max-content; }
+        .panel { grid-template-columns: 1fr; }
+        .number { border-right: 0; border-bottom: 1px solid var(--line); }
+      }
+    </style>
+    <script type="module" src="/sandbox.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">epok-auth / enlace de un solo uso</div>
+          <h1>Tu correo es la llave.</h1>
+        </div>
+        <div class="stamp">Solo local<br />Token efímero<br />Sesión real</div>
+      </header>
+
+      <section class="panel">
+        <div class="number">01</div>
+        <div class="content">
+          <div class="eyebrow">Prueba completa</div>
+          <p>
+            El sandbox genera un correo local, liga el enlace a este navegador y consume el token
+            después de borrarlo del historial.
+          </p>
+          <label for="email">Cuenta de prueba</label>
+          <input id="email" value="browser@example.com" readonly />
+          <button id="request-link" type="button">Enviar y abrir Magic Link</button>
+        </div>
+      </section>
+
+      <div id="status" role="status" aria-live="polite">Listo para solicitar un enlace.</div>
+
+      <section id="session-result" hidden>
+        <div class="result-label">Sesión verificada</div>
+        <div id="result-name" class="result-name"></div>
+        <div id="result-email" class="result-email"></div>
+      </section>
+
+      <footer>
+        La cuenta y el correo viven solo en memoria. En producción usa PostgreSQL, una cola durable,
+        un proveedor de correo y rate limiting perimetral.
+      </footer>
+    </main>
+  </body>
+</html>

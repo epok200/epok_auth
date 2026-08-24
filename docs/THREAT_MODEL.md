@@ -5,6 +5,7 @@
 - password verifiers;
 - passkey public keys, credential identifiers and ceremony challenges;
 - Google external identity links and nonce challenges;
+- email-link hashes, browser nonces and short-lived delivery payloads;
 - active browser sessions;
 - access and refresh credentials;
 - user and role state;
@@ -20,6 +21,8 @@
 5. Redis, when introduced, is only an optimization and never the authority.
 6. Google certificate and identity claims are an external trust boundary verified by the official
    backend client.
+7. The configured SMTP or email API is an external delivery boundary. Provider acceptance is not
+   proof of inbox delivery.
 
 ## In-scope attackers
 
@@ -70,8 +73,16 @@
 | Google-only password DoS | Password login executes dummy verification but cannot increment lockout state when disabled |
 | Lost Google access | Administrative recovery removes the identity, restores a temporary password and revokes sessions atomically |
 | Recovery races | Link revalidates its persisted session inside the write transaction; recovery, link and refresh use a tested lock order |
+| Email-link database disclosure | Only token, recipient and browser hashes are persisted |
+| Email-link replay | Expiry, generation, state and atomic one-time consumption |
+| Login link forwarding | A separate HttpOnly browser nonce is required |
+| Stale recovery link | Account `security_version` changes across every security-sensitive mutation |
+| Email replacement failure | The old active link remains valid until a newer delivery is accepted |
+| Email account enumeration | Generic public responses and persistent per-account request limits |
+| Email dispatch outage | Generic `202`, failed-link audit event and no provider detail in logs |
+| Token leakage through logs/history | URL fragment transport, `repr=False`, no `GET` consumption and `no-store` |
 
-## Explicit non-goals in 0.3.0
+## Explicit non-goals in 0.4.0
 
 - attestation trust decisions about authenticator manufacturers;
 - passkeys as an automatic MFA or step-up policy;
@@ -90,10 +101,16 @@
 - BFF architecture reduces token exposure but does not make XSS harmless; CSP and frontend hygiene remain required.
 - Public passkey option endpoints still need edge rate limiting against resource exhaustion.
 - Public Google option and verification endpoints still need edge rate limiting.
+- Public email-link request endpoints need edge and IP-based rate limiting in addition to the
+  persistent per-account limit.
 - A Google verification outage prevents new Google sessions until certificates can be validated;
   existing local sessions continue under normal session policy.
 - Incorrect OAuth client Origins or hosted-domain policy can deny legitimate access; configuration
   rollout must include a recovery administrator.
 - A product must provide recovery before making passkeys its only usable account access path.
+- Email is not an out-of-band authenticator under NIST SP 800-63B. Magic Links are opt-in AAL1
+  access, not MFA and not a sole recovery mechanism for administrators, passkeys, Google or MFA.
+- SMTP acceptance does not prove inbox delivery. Durable products need a provider, queue and
+  operational delivery monitoring.
 - Deployments behind a proxy must configure trusted proxy addresses in the ASGI server so
   `request.client` is rewritten only for trusted hops.

@@ -288,6 +288,7 @@ async def test_recovery_removes_google_link_revokes_sessions_and_restores_passwo
 
     recovered = await harness.google.recover_password_access(google_session.principal.user_id)
 
+    assert recovered.user.security_version == 1
     assert recovered.user.password_login_enabled is True
     assert recovered.user.must_change_password is True
     assert recovered.user.google_auto_link_allowed is False

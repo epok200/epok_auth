@@ -157,6 +157,14 @@ class PasskeyService:
                         "The account has reached its passkey limit.",
                     )
                 await transaction.insert_passkey(passkey)
+                assert user is not None
+                await transaction.update_user(
+                    replace(
+                        user,
+                        security_version=user.security_version + 1,
+                        updated_at=now,
+                    )
+                )
                 await self._event(
                     transaction,
                     SecurityEventType.PASSKEY_REGISTERED,
@@ -302,7 +310,18 @@ class PasskeyService:
             )
             if credential is None or credential.revoked_at is not None:
                 raise AuthError(AuthErrorCode.PASSKEY_NOT_FOUND, "Passkey not found.")
+            user = await transaction.get_user_by_id(principal.user_id, for_update=True)
+            if not _can_authenticate(user, now):
+                raise invalid_session()
             await transaction.update_passkey(replace(credential, revoked_at=now))
+            assert user is not None
+            await transaction.update_user(
+                replace(
+                    user,
+                    security_version=user.security_version + 1,
+                    updated_at=now,
+                )
+            )
             await self._event(
                 transaction,
                 SecurityEventType.PASSKEY_REVOKED,

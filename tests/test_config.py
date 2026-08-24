@@ -103,6 +103,8 @@ def test_cookie_security_invariants() -> None:
         make(cookie_use_host_prefix=True, cookie_path="/auth", secure_cookies=True)
     with pytest.raises(ValidationError, match="different"):
         make(refresh_cookie_name="same", csrf_cookie_name="same")
+    with pytest.raises(ValidationError, match="different"):
+        make(email_link_cookie_name="epok_refresh")
 
 
 def test_host_cookie_names_are_derived_without_double_prefix() -> None:
@@ -168,6 +170,9 @@ def test_normalizes_passkey_identity() -> None:
     assert settings.passkey_rp_id == "login.example.com"
     assert settings.effective_passkey_rp_name == "Colors"
 
+    with pytest.raises(ValidationError, match="printable"):
+        make(passkey_rp_name="  ")
+
 
 def test_production_fails_closed() -> None:
     base = {
@@ -200,3 +205,56 @@ def test_production_fails_closed() -> None:
 
 def test_environment_values_are_stable() -> None:
     assert {item.value for item in Environment} == {"development", "test", "production"}
+
+
+def test_email_link_urls_are_normalized_and_bound_to_trusted_origins() -> None:
+    settings = make(
+        trusted_origins=("https://app.example.com", "http://[::1]:3000"),
+        email_link_login_url="HTTPS://APP.EXAMPLE.COM:443/login/",
+        email_link_password_reset_url="https://app.example.com/reset",
+        email_link_invitation_url="https://app.example.com/invitation",
+    )
+
+    assert settings.email_link_login_url == "https://app.example.com/login"
+    assert settings.effective_email_link_cookie_name == "epok_email_link"
+    assert settings.trusted_origins[-1] == "http://[::1]:3000"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.com/login",
+        "https://user:password@example.com/login",
+        "https://example.com/login?token=bad",
+        "https://example.com/login#token=bad",
+        "https://example.com:invalid/login",
+        "not-a-url",
+    ],
+)
+def test_rejects_unsafe_email_link_urls(url: str) -> None:
+    with pytest.raises(ValidationError):
+        make(
+            trusted_origins=("https://example.com",),
+            email_link_login_url=url,
+            email_link_password_reset_url="https://example.com/reset",
+            email_link_invitation_url="https://example.com/invitation",
+        )
+
+
+def test_email_link_configuration_is_complete_trusted_and_retained() -> None:
+    with pytest.raises(ValidationError, match="all email link"):
+        make(email_link_login_url="http://localhost:3000/login")
+    with pytest.raises(ValidationError, match="trusted origins"):
+        make(
+            email_link_login_url="https://app.example.com/login",
+            email_link_password_reset_url="https://app.example.com/reset",
+            email_link_invitation_url="https://app.example.com/invitation",
+        )
+    with pytest.raises(ValidationError, match="retention"):
+        make(
+            email_link_login_url="http://localhost:3000/login",
+            email_link_password_reset_url="http://localhost:3000/reset",
+            email_link_invitation_url="http://localhost:3000/invitation",
+            email_link_invitation_ttl_seconds=600,
+            email_link_retention_seconds=300,
+        )

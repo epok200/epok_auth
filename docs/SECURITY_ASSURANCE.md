@@ -2,6 +2,21 @@
 
 This document maps beta capabilities to executable evidence. It is not a claim that vulnerabilities are impossible.
 
+## 0.4.0 validation snapshot
+
+The current Magic Link branch was validated locally on 2026-08-24 with:
+
+- 374 Python tests, including 25 cases against PostgreSQL 17;
+- 98.40% branch-aware coverage across the complete package;
+- 42 focused email-link tests with 100% statement and branch coverage;
+- a real Chromium flow covering fragment cleanup, browser binding and session cookies;
+- Ruff, Pyright strict, `pip-audit` and the Magic Link npm audit passing;
+- wheel and source distribution allowlists with no tests, docs, examples or environment files;
+- isolated Python 3.12 installation of wheel and sdist for the base package, CLI and all extras.
+
+Python 3.13, Python 3.14, CodeQL and clean-runner CI remain release-gate evidence, not claims of
+this local snapshot.
+
 ## Release evidence snapshot
 
 The `0.3.0` release was accepted by the standalone library gate after all of the
@@ -53,6 +68,16 @@ product deployment still requires the controls listed at the end of this documen
 | Google concurrency | Concurrent first login creates one external identity and preserves valid sessions | memory and PostgreSQL integration tests |
 | Google recovery | Identity removal, temporary password, session revocation and event commit atomically | service, HTTP and PostgreSQL tests |
 | Google browser client | Chromium exercises the official-button contract, failure retry and real epok-auth cookies through the sandbox | `examples/google/browser.e2e.test.mjs` |
+| Magic Link secrecy | Random tokens are hashed at rest, omitted from representations and transported in URL fragments | `tests/email_links/test_service.py`, model and PostgreSQL assertions |
+| Magic Link replay | Provider-activated links expire and commit one atomic consumption | email-link service, HTTP and PostgreSQL tests |
+| Magic Link browser binding | Login requires the HttpOnly nonce cookie created by the requesting browser | email-link service and HTTP abuse tests |
+| Magic Link browser client | Chromium proves fragment cleanup, foreign-browser rejection and real session cookies | `examples/email_links/browser.e2e.test.mjs` |
+| Email replacement | A pending or failed replacement never revokes the previous active link | email-link service delivery tests |
+| Password recovery | Password changes without auto-login and revokes every existing session | email-link service and HTTP flows |
+| Invitation boundary | Only a pre-provisioned account activates, without creating a session or admin access | email-link service and HTTP flows |
+| SMTP delivery | TLS modes, credential redaction, rendering and safe provider errors are tested | `tests/email_links/test_smtp.py` |
+| Durable email dispatch | Production requires an injected queue, links stay pending until worker delivery and queue failures preserve generic responses | dispatcher and artifact smoke tests |
+| Security fencing | Credential, permission, Google and passkey changes invalidate previously issued links | cross-feature service tests |
 | Last administrator | Concurrent operations cannot remove the final active admin | memory and PostgreSQL invariant tests |
 | Secret redaction | Validation and auth responses do not echo submitted secrets | HTTP and CLI tests |
 | Audit IP integrity | Direct clients cannot spoof event IPs with forwarding headers | HTTP abuse tests |

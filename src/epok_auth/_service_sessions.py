@@ -66,6 +66,11 @@ class SessionServiceMethods(AuthServiceBase):
                         user,
                         failed_login_attempts=attempts,
                         locked_until=locked_until,
+                        security_version=(
+                            user.security_version + 1
+                            if locked_until is not None
+                            else user.security_version
+                        ),
                         updated_at=now,
                     )
                     await transaction.update_user(user)
@@ -301,6 +306,7 @@ class SessionServiceMethods(AuthServiceBase):
                 google_auto_link_allowed=False,
                 failed_login_attempts=0,
                 locked_until=None,
+                security_version=user.security_version + 1,
                 password_changed_at=now,
                 updated_at=now,
             )

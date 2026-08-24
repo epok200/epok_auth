@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 - 2026-08-24
+
+- add opt-in Magic Link login bound to the requesting browser;
+- add single-use password recovery and pre-provisioned account invitations;
+- add native Gmail-compatible SMTP delivery plus injectable sender and durable dispatcher contracts;
+- keep links pending until the provider accepts the email and preserve older active links on
+  delivery failure;
+- invalidate stale links after password, account access, Google identity or passkey changes;
+- add reversible PostgreSQL persistence, persistent per-account limits and security events;
+- add FastAPI routes with generic request responses, Origin validation, secure cookies and
+  `no-store`;
+- add unit, HTTP, abuse, SMTP, migration, PostgreSQL and Chromium flow tests;
+- document provider integration, durable worker boundaries and the NIST email assurance limit.
+
 ## 0.3.0 - 2026-08-24
 
 - add optional Google Sign-In through the official `google-auth` verifier;

@@ -167,6 +167,11 @@ class UserServiceMethods(AuthServiceBase):
                 if update.google_auto_link_allowed is not None
                 else current.google_auto_link_allowed
             )
+            email_link_login_enabled = (
+                update.email_link_login_enabled
+                if update.email_link_login_enabled is not None
+                else current.email_link_login_enabled
+            )
             loses_active_admin = (
                 current.status is UserStatus.ACTIVE
                 and self.settings.admin_role in current.roles
@@ -185,6 +190,14 @@ class UserServiceMethods(AuthServiceBase):
                     "At least one active administrator is required.",
                     status_code=409,
                 )
+            security_changed = (
+                status is not current.status
+                or roles != current.roles
+                or scopes != current.scopes
+                or google_auto_link_allowed != current.google_auto_link_allowed
+                or email_link_login_enabled != current.email_link_login_enabled
+            )
+            security_version = current.security_version + int(security_changed)
             updated = replace(
                 current,
                 display_name=display_name,
@@ -192,6 +205,8 @@ class UserServiceMethods(AuthServiceBase):
                 roles=roles,
                 scopes=scopes,
                 google_auto_link_allowed=google_auto_link_allowed,
+                email_link_login_enabled=email_link_login_enabled,
+                security_version=security_version,
                 updated_at=now,
             )
             await transaction.update_user(updated)
@@ -234,6 +249,7 @@ class UserServiceMethods(AuthServiceBase):
                 google_auto_link_allowed=False,
                 failed_login_attempts=0,
                 locked_until=None,
+                security_version=current.security_version + 1,
                 password_changed_at=now,
                 updated_at=now,
             )

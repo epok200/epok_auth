@@ -56,6 +56,7 @@ def reset_database(database_url: str) -> Iterator[None]:
             TRUNCATE epok_auth.security_event,
                      epok_auth.google_challenge,
                      epok_auth.external_identity,
+                     epok_auth.email_link,
                      epok_auth.passkey_challenge,
                      epok_auth.passkey_credential,
                      epok_auth.refresh_session,
@@ -86,6 +87,9 @@ def settings(database_url: str) -> AuthSettings:
         passkey_rp_name="EPOK PostgreSQL tests",
         google_client_id=CLIENT_ID,
         google_account_mode=GoogleAccountMode.OPEN,
+        email_link_login_url=f"{ORIGIN}/login",
+        email_link_password_reset_url=f"{ORIGIN}/reset-password",
+        email_link_invitation_url=f"{ORIGIN}/invitation",
     )
 
 

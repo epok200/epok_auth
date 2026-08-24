@@ -13,7 +13,7 @@ pytestmark = pytest.mark.integration
 
 DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 HOST_REVISION = "host_0001"
-CURRENT_REVISION = "0003_google_identity"
+CURRENT_REVISION = "0004_email_links"
 VERSION_TABLE = "epok_auth_alembic_version"
 
 

@@ -55,6 +55,7 @@ async def test_explicit_link_is_idempotent_but_rejects_a_second_google_identity(
         admin.id,
         UserUpdate(google_auto_link_allowed=True),
     )
+    authorized_version = store.users[admin.id].security_version
     session = await harness.auth.login(admin.email, "link conflict protects private colors")
 
     first = await harness.google.begin_link(session.principal, ORIGIN)
@@ -65,6 +66,7 @@ async def test_explicit_link_is_idempotent_but_rejects_a_second_google_identity(
         "first",
         ORIGIN,
     )
+    linked_version = store.users[admin.id].security_version
 
     repeated = await harness.google.begin_link(session.principal, ORIGIN)
     harness.verifier.add("repeated", claims(subject="first-subject"))
@@ -86,6 +88,8 @@ async def test_explicit_link_is_idempotent_but_rejects_a_second_google_identity(
         )
 
     assert same.id == linked.id
+    assert linked_version == authorized_version + 1
+    assert store.users[admin.id].security_version == linked_version
     assert store.users[admin.id].google_auto_link_allowed is False
     assert captured.value.code is AuthErrorCode.GOOGLE_IDENTITY_CONFLICT
     assert store.events[-1].event_type is SecurityEventType.GOOGLE_LINK_FAILED

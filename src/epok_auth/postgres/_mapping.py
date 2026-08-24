@@ -2,6 +2,7 @@ from typing import Any
 
 from sqlalchemy.engine import RowMapping
 
+from epok_auth.email_links.models import EmailLink, EmailLinkPurpose, EmailLinkState
 from epok_auth.google.models import (
     ExternalIdentity,
     GoogleChallenge,
@@ -28,7 +29,9 @@ def user_values(user: UserAccount) -> SqlValues:
         "scopes": list(user.scopes),
         "must_change_password": user.must_change_password,
         "password_login_enabled": user.password_login_enabled,
+        "email_link_login_enabled": user.email_link_login_enabled,
         "google_auto_link_allowed": user.google_auto_link_allowed,
+        "security_version": user.security_version,
         "failed_login_attempts": user.failed_login_attempts,
         "locked_until": user.locked_until,
         "password_changed_at": user.password_changed_at,
@@ -99,6 +102,25 @@ def google_challenge_values(challenge: GoogleChallenge) -> SqlValues:
     }
 
 
+def email_link_values(link: EmailLink) -> SqlValues:
+    return {
+        "id": link.id,
+        "user_id": link.user_id,
+        "purpose": link.purpose.value,
+        "generation": link.generation,
+        "token_hash": link.token_hash,
+        "recipient_hash": link.recipient_hash,
+        "browser_hash": link.browser_hash,
+        "security_version": link.security_version,
+        "state": link.state.value,
+        "created_at": link.created_at,
+        "expires_at": link.expires_at,
+        "delivered_at": link.delivered_at,
+        "consumed_at": link.consumed_at,
+        "revoked_at": link.revoked_at,
+    }
+
+
 def external_identity_values(identity: ExternalIdentity) -> SqlValues:
     return {
         "id": identity.id,
@@ -122,7 +144,9 @@ def user_from_row(row: RowMapping) -> UserAccount:
         scopes=tuple(row["scopes"] or ()),
         must_change_password=row["must_change_password"],
         password_login_enabled=row["password_login_enabled"],
+        email_link_login_enabled=row["email_link_login_enabled"],
         google_auto_link_allowed=row["google_auto_link_allowed"],
+        security_version=row["security_version"],
         failed_login_attempts=row["failed_login_attempts"],
         locked_until=row["locked_until"],
         password_changed_at=row["password_changed_at"],
@@ -190,6 +214,25 @@ def google_challenge_from_row(row: RowMapping) -> GoogleChallenge:
         created_at=row["created_at"],
         expires_at=row["expires_at"],
         consumed_at=row["consumed_at"],
+    )
+
+
+def email_link_from_row(row: RowMapping) -> EmailLink:
+    return EmailLink(
+        id=row["id"],
+        user_id=row["user_id"],
+        purpose=EmailLinkPurpose(row["purpose"]),
+        generation=row["generation"],
+        token_hash=row["token_hash"],
+        recipient_hash=row["recipient_hash"],
+        browser_hash=row["browser_hash"],
+        security_version=row["security_version"],
+        state=EmailLinkState(row["state"]),
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        delivered_at=row["delivered_at"],
+        consumed_at=row["consumed_at"],
+        revoked_at=row["revoked_at"],
     )
 
 

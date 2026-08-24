@@ -171,7 +171,7 @@ Required pull request gates are:
 - Ruff formatting, lint, and security rules;
 - Pyright strict for production code;
 - dependency vulnerability auditing;
-- Node conversion tests plus a real headless Chromium WebAuthn ceremony;
+- browser helper tests plus real headless Chromium proofs for WebAuthn, Google and Magic Links;
 - wheel and source distribution build and isolated installation;
 - `CI / merge-gate` green after quality, tests, PostgreSQL, coverage, and package jobs;
 - the separate `CodeQL / Analyze` security check green.

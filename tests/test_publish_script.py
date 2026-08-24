@@ -140,7 +140,9 @@ def test_artifact_smoke_contract_covers_base_and_optional_installs() -> None:
     compile(passkey_code, "<passkey-smoke>", "exec")
     assert "find_spec('webauthn') is None" in base_code
     assert "find_spec('google') is None" in base_code
-    assert "0003_google_identity.py" in base_code
+    assert "0004_email_links.py" in base_code
+    assert "email_link_dispatcher=EmailQueue()" in base_code
+    assert "'/auth/email-links/login'" in base_code
     assert "WebAuthnAdapter" in passkey_code
     assert "GoogleAuthVerifier" in passkey_code
     assert "PostgresAuthStore" in passkey_code
@@ -240,6 +242,8 @@ def test_local_release_gate_runs_the_google_browser_proof(
         "high",
     ] in commands
     assert ["node", "--test", "examples/google/browser.e2e.test.mjs"] in commands
+    assert ["npm", "ci", "--prefix", "examples/email_links"] in commands
+    assert ["node", "--test", "examples/email_links/browser.e2e.test.mjs"] in commands
 
 
 def test_publish_arguments_never_contain_the_token() -> None:

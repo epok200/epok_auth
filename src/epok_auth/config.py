@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from epok_auth._validation import normalize_domain
+from epok_auth._validation import canonical_origin, normalize_domain
 
 
 class Environment(StrEnum):
@@ -100,6 +100,18 @@ class AuthSettings(BaseSettings):
     google_token_timeout_seconds: int = Field(default=5, ge=1, le=30)
     google_max_credential_chars: int = Field(default=8192, ge=1024, le=16384)
 
+    email_link_login_url: str | None = None
+    email_link_password_reset_url: str | None = None
+    email_link_invitation_url: str | None = None
+    email_link_login_ttl_seconds: int = Field(default=10 * 60, ge=60, le=60 * 60)
+    email_link_password_reset_ttl_seconds: int = Field(default=15 * 60, ge=60, le=60 * 60)
+    email_link_invitation_ttl_seconds: int = Field(default=24 * 60 * 60, ge=300, le=86400)
+    email_link_request_window_seconds: int = Field(default=15 * 60, ge=60, le=86400)
+    email_link_max_requests_per_window: int = Field(default=3, ge=1, le=20)
+    email_link_retention_seconds: int = Field(default=7 * 86400, ge=300, le=90 * 86400)
+    email_link_max_token_chars: int = Field(default=128, ge=64, le=512)
+    email_link_cookie_name: str = "epok_email_link"
+
     admin_role: str = Field(default="admin", min_length=1, max_length=100)
     default_user_role: str = Field(default="user", min_length=1, max_length=100)
 
@@ -163,10 +175,9 @@ class AuthSettings(BaseSettings):
             local = host in {"localhost", "127.0.0.1", "::1"}
             if scheme != "https" and not (scheme == "http" and local):
                 raise ValueError("trusted origins must use HTTPS, except localhost origins")
-            default_port = (scheme == "https" and parsed.port in (None, 443)) or (
-                scheme == "http" and parsed.port in (None, 80)
-            )
-            canonical = f"{scheme}://{host}" if default_port else f"{scheme}://{host}:{parsed.port}"
+            canonical = canonical_origin(origin)
+            if not canonical:
+                raise ValueError("trusted_origins must contain valid ports")
             normalized.append(canonical)
         if len(normalized) != len(set(normalized)):
             raise ValueError("trusted_origins must not contain duplicates")
@@ -222,13 +233,54 @@ class AuthSettings(BaseSettings):
             raise ValueError("google_hosted_domains must not contain duplicates")
         return normalized
 
-    @field_validator("refresh_cookie_name", "csrf_cookie_name", "csrf_header_name")
+    @field_validator(
+        "refresh_cookie_name",
+        "csrf_cookie_name",
+        "csrf_header_name",
+        "email_link_cookie_name",
+    )
     @classmethod
     def validate_http_name(cls, value: str) -> str:
         stripped = value.strip()
         if _HTTP_TOKEN.fullmatch(stripped) is None:
             raise ValueError("cookie and header names must use valid HTTP token characters")
         return stripped
+
+    @field_validator(
+        "email_link_login_url",
+        "email_link_password_reset_url",
+        "email_link_invitation_url",
+    )
+    @classmethod
+    def validate_email_link_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().rstrip("/")
+        try:
+            parsed = urlsplit(normalized)
+            host = (parsed.hostname or "").casefold()
+            port = parsed.port
+        except ValueError as error:
+            raise ValueError("email link URLs must be valid absolute URLs") from error
+        local = host in {"localhost", "127.0.0.1", "::1"}
+        if (
+            not host
+            or parsed.scheme.casefold() not in {"http", "https"}
+            or (parsed.scheme.casefold() != "https" and not local)
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("email link URLs require HTTPS, except localhost, without query data")
+        default_port = (parsed.scheme.casefold() == "https" and port in (None, 443)) or (
+            parsed.scheme.casefold() == "http" and port in (None, 80)
+        )
+        authority = f"[{host}]" if ":" in host else host
+        if not default_port:
+            authority = f"{authority}:{port}"
+        path = parsed.path.rstrip("/")
+        return f"{parsed.scheme.casefold()}://{authority}{path}"
 
     @model_validator(mode="after")
     def validate_security_invariants(self) -> Self:
@@ -246,13 +298,44 @@ class AuthSettings(BaseSettings):
             raise ValueError("refresh idle TTL cannot exceed the absolute session TTL")
         if self.password_min_length > self.password_max_length:
             raise ValueError("password_min_length cannot exceed password_max_length")
+        email_link_urls = (
+            self.email_link_login_url,
+            self.email_link_password_reset_url,
+            self.email_link_invitation_url,
+        )
+        if any(email_link_urls) and not all(email_link_urls):
+            raise ValueError("all email link frontend URLs must be configured together")
+        for url in email_link_urls:
+            if url is None:
+                continue
+            parsed = urlsplit(url)
+            origin = canonical_origin(f"{parsed.scheme}://{parsed.netloc}")
+            if origin not in self.trusted_origins:
+                raise ValueError("email link frontend origins must be trusted origins")
+        minimum_retention = max(
+            self.email_link_login_ttl_seconds,
+            self.email_link_password_reset_ttl_seconds,
+            self.email_link_invitation_ttl_seconds,
+            self.email_link_request_window_seconds,
+        )
+        if self.email_link_retention_seconds < minimum_retention:
+            raise ValueError("email link retention must cover every TTL and rate-limit window")
         if (
             self.google_account_mode is GoogleAccountMode.OPEN
             and self.default_user_role == self.admin_role
         ):
             raise ValueError("open Google accounts cannot receive the administrative role")
-        if self.effective_refresh_cookie_name == self.effective_csrf_cookie_name:
-            raise ValueError("refresh and CSRF cookie names must be different")
+        if (
+            len(
+                {
+                    self.effective_refresh_cookie_name,
+                    self.effective_csrf_cookie_name,
+                    self.effective_email_link_cookie_name,
+                }
+            )
+            != 3
+        ):
+            raise ValueError("authentication cookie names must be different")
         if self.cookie_same_site == "none" and not self.secure_cookies:
             raise ValueError("SameSite=None cookies require Secure")
         if self.cookie_use_host_prefix:
@@ -282,6 +365,10 @@ class AuthSettings(BaseSettings):
     @property
     def effective_csrf_cookie_name(self) -> str:
         return self._cookie_name(self.csrf_cookie_name)
+
+    @property
+    def effective_email_link_cookie_name(self) -> str:
+        return self._cookie_name(self.email_link_cookie_name)
 
     @property
     def effective_passkey_rp_name(self) -> str:

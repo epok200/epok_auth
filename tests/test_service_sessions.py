@@ -368,8 +368,10 @@ async def test_logout_rejects_csrf_that_does_not_match_stored_session(
 @pytest.mark.asyncio
 async def test_change_password_revokes_old_family_and_starts_fresh_session(
     service: AuthService,
+    store: MemoryAuthStore,
 ) -> None:
     old = await create_admin_and_login(service)
+    initial_version = store.users[old.principal.user_id].security_version
     with pytest.raises(AuthError):
         await service.change_password(old.principal, "wrong password value", NEW_PASSWORD)
     with pytest.raises(AuthError) as same:
@@ -377,6 +379,7 @@ async def test_change_password_revokes_old_family_and_starts_fresh_session(
     assert same.value.code is AuthErrorCode.PASSWORD_INVALID
 
     new = await service.change_password(old.principal, ADMIN_PASSWORD, NEW_PASSWORD)
+    assert store.users[old.principal.user_id].security_version == initial_version + 1
     assert new.principal.family_id != old.principal.family_id
     assert new.principal.must_change_password is False
     with pytest.raises(AuthError):

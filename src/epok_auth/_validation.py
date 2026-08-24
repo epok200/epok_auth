@@ -90,4 +90,5 @@ def canonical_origin(origin: str) -> str:
     default_port = (scheme == "https" and port in (None, 443)) or (
         scheme == "http" and port in (None, 80)
     )
-    return f"{scheme}://{host}" if default_port else f"{scheme}://{host}:{port}"
+    authority = f"[{host}]" if ":" in host else host
+    return f"{scheme}://{authority}" if default_port else f"{scheme}://{authority}:{port}"

@@ -15,21 +15,28 @@ reference client. Published in `0.2.1`.
 Google Identity Services, ID token verification with the official client, external identities keyed
 by issuer and subject, linked-only, preauthorized and open account policies, explicit linking,
 administrative recovery, PostgreSQL persistence and a browser sandbox. Implemented in the current
-unreleased branch.
+public `0.3.0` release.
 
-## 0.4 - Invitations and recovery
+## 0.4 - Magic Links and email delivery
 
-One-time invitation tokens, recovery workflows, callback interfaces for email/WhatsApp, user-visible session/device management, recovery codes and optional Redis coordination/rate limiting.
+Browser-bound Magic Link login, single-use password recovery, pre-provisioned invitations, native
+SMTP, injectable provider adapters, security fencing, PostgreSQL persistence and complete FastAPI
+flows. Implemented in `0.4.0`.
 
-## 0.5 - Generic OpenID Connect
+## 0.5 - Account operations
+
+User-visible session and device management, recovery codes, delivery observability and optional
+Redis coordination or rate limiting.
+
+## 0.6 - Generic OpenID Connect
 
 Additional OIDC providers and provider interfaces based on standard OIDC clients.
 
-## 0.6 - MFA and step-up
+## 0.7 - MFA and step-up
 
 TOTP, recovery codes, factor administration, recent-authentication policies and step-up requirements for sensitive operations.
 
-## 0.7 - Distributed verification
+## 0.8 - Distributed verification
 
 Asymmetric signing, `kid`, JWKS, key rotation, distributed API validation and optional Redis-backed coordination.
 
