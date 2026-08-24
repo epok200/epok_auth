@@ -24,9 +24,9 @@ The Google rows below describe the unreleased `0.3` candidate. They do not claim
 Sign-In exists in the published `0.2.1` artifact. The candidate is releasable only after its own
 clean `CI / merge-gate` and CodeQL run succeed.
 
-The current candidate passes 270 Python tests with disposable PostgreSQL, including five
-coordinated Google concurrency cases. Its 258 non-integration tests pass on Python 3.12, 3.13 and
-3.14, branch-aware coverage reaches 90.40%, and the passkey and Google Chromium flows pass. Ruff,
+The current candidate passes 321 Python tests with disposable PostgreSQL, including five
+coordinated Google concurrency cases. Its 299 non-integration tests pass on Python 3.12, 3.13 and
+3.14, branch-aware coverage reaches 98.23%, and the passkey and Google Chromium flows pass. Ruff,
 Pyright, `pip-audit`, both npm audits, artifact allowlists and isolated base/full-extra installs are
 also clean. PostgreSQL 17, CodeQL and the aggregate merge gate remain required CI evidence before
 publication.
@@ -64,7 +64,7 @@ publication.
 | Secret redaction | Validation and auth responses do not echo submitted secrets | HTTP and CLI tests |
 | Audit IP integrity | Direct clients cannot spoof event IPs with forwarding headers | HTTP abuse tests |
 | Configuration | Production rejects weak secrets, insecure cookies and ambiguous origins | `test_config.py` |
-| Migration safety | Empty-database migration commits and schema metadata remains drift-free | PostgreSQL 17 job and `test_migrate.py` |
+| Migration safety | epok-auth owns a dedicated Alembic history, preserves a host application's history and adopts only trusted legacy epok-auth revisions | PostgreSQL 17 job, `test_migrate.py` and `test_migration_isolation_integration.py` |
 | Packaging | Built wheel imports and exposes CLI in an isolated environment | GitHub Actions package job |
 | Optional Google install | Base artifact imports without Google dependencies and the `google` extra loads the official adapter | artifact smoke tests |
 | Compatibility | Core suite passes Python 3.12, 3.13 and 3.14 | GitHub Actions matrix |

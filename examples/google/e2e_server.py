@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -10,7 +11,7 @@ from epok_auth.google.service import GoogleLoginService
 from epok_auth.service import AuthService
 from epok_auth.testing import MemoryAuthStore
 
-SANDBOX_ORIGIN = "http://localhost:8766"
+SANDBOX_ORIGIN = os.environ.get("EPOK_AUTH_BROWSER_ORIGIN", "http://localhost:8766")
 CLIENT_ID = "123456789-browser.apps.googleusercontent.com"
 EXAMPLE_DIR = Path(__file__).parent
 
@@ -43,7 +44,7 @@ google = GoogleLoginService(
     passwords=service.passwords,
 )
 auth = EpokAuth(settings=settings, store=store, service=service, google=google)
-api_app = FastAPI(title="epok-auth Google browser proof")
+api_app = FastAPI(title="epok-auth Google browser proof", lifespan=auth.lifespan)
 auth.install(api_app, prefix="/api/v1/auth", include_google=True)
 
 

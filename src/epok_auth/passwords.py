@@ -2,6 +2,8 @@ import hmac
 from dataclasses import dataclass
 from typing import Protocol, Self
 
+from pwdlib import PasswordHash as PwdlibPasswordHash
+
 from epok_auth.errors import AuthError, AuthErrorCode
 
 
@@ -11,34 +13,7 @@ class PasswordHash(Protocol):
 
 
 def _recommended_hash() -> PasswordHash:
-    try:
-        from pwdlib import PasswordHash as PwdlibPasswordHash
-
-        return PwdlibPasswordHash.recommended()
-    except ImportError:  # pragma: no cover - fallback for restricted source checkouts
-        return _Argon2Fallback()
-
-
-class _Argon2Fallback:
-    def __init__(self) -> None:
-        from argon2 import PasswordHasher
-
-        self._hasher = PasswordHasher()
-
-    def hash(self, password: str) -> str:
-        return self._hasher.hash(password)
-
-    def verify_and_update(self, password: str, encoded_hash: str) -> tuple[bool, str | None]:
-        from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-
-        try:
-            valid = self._hasher.verify(encoded_hash, password)
-        except (InvalidHashError, VerificationError, VerifyMismatchError):
-            return False, None
-        updated = (
-            self.hash(password) if valid and self._hasher.check_needs_rehash(encoded_hash) else None
-        )
-        return bool(valid), updated
+    return PwdlibPasswordHash.recommended()
 
 
 class PasswordRule(Protocol):

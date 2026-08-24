@@ -5,7 +5,7 @@ from epok_auth import AuthSettings, EpokAuth, Principal
 settings = AuthSettings()
 auth = EpokAuth.postgres(settings=settings)
 
-app = FastAPI(title="epok-auth minimal example")
+app = FastAPI(title="epok-auth minimal example", lifespan=auth.lifespan)
 auth.install(app, prefix="/api/v1/auth", include_admin=True)
 
 private = auth.protected_router(prefix="/api/v1/private", tags=["private"])

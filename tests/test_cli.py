@@ -79,6 +79,36 @@ def test_database_commands_require_database_url(monkeypatch: pytest.MonkeyPatch)
     assert "DATABASE_URL is required" in result.output
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["upgrade-db"],
+        ["check-db"],
+        [
+            "create-admin",
+            "--email",
+            "admin@example.com",
+            "--display-name",
+            "Admin",
+            "--password",
+            "private password for command",
+        ],
+    ],
+)
+def test_database_commands_reject_invalid_configuration_without_leaking_values(
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
+) -> None:
+    valid_environment(monkeypatch)
+    monkeypatch.setenv("EPOK_AUTH_JWT_SECRET", "private-but-short")
+
+    result = runner.invoke(cli.app, command)
+
+    assert result.exit_code == 1
+    assert "configuration is invalid" in result.output
+    assert "private-but-short" not in result.output
+
+
 def test_create_admin_command_delegates_without_echoing_password(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

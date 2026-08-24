@@ -34,7 +34,7 @@ La versión se declara una sola vez en `pyproject.toml`:
 
 ```toml
 [project]
-version = "0.2.1"
+version = "<versión actual>"
 ```
 
 `epok_auth.__version__` se obtiene mediante `importlib.metadata`, así que no existe una segunda constante que mantener.
@@ -182,9 +182,9 @@ El contenedor PostgreSQL se elimina en un bloque de limpieza aunque una prueba f
 
 ## Serie publicada
 
-`0.2.0` introdujo passkeys y tiene el tag `v0.2.0`. `0.2.1` es el patch de metadata
-correspondiente, sin cambios funcionales. Cada release se valida desde un `main` limpio
-y con CI verde mediante:
+La serie `0.2` introdujo passkeys. La serie `0.3` incorpora Google Sign-In con políticas de
+cuenta y aislamiento del historial Alembic. Cada release se valida desde un `main` limpio y con
+CI verde mediante:
 
 ```bash
 uv run scripts/publish.py --validate-only

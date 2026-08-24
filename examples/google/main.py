@@ -19,8 +19,9 @@ settings = AuthSettings.development(
     google_client_id=client_id,
     google_account_mode=GoogleAccountMode.OPEN,
 )
-auth = EpokAuth(settings=settings, store=MemoryAuthStore())
-app = FastAPI(title="epok-auth Google Sign-In sandbox")
+store = MemoryAuthStore()
+auth = EpokAuth(settings=settings, store=store, google_store=store)
+app = FastAPI(title="epok-auth Google Sign-In sandbox", lifespan=auth.lifespan)
 auth.install(app, prefix="/api/v1/auth", include_google=True)
 
 

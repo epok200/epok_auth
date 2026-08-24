@@ -288,13 +288,14 @@ class GoogleLoginService:
         now: datetime,
         context: RequestContext,
     ) -> SessionBundle | None:
-        match self.settings.google_account_mode:
-            case GoogleAccountMode.LINKED_ONLY:
-                return None
-            case GoogleAccountMode.PREAUTHORIZED:
-                return await self._login_preauthorized(transaction, claims, now, context)
-            case GoogleAccountMode.OPEN:
-                return await self._login_open(transaction, claims, now, context)
+        mode = self.settings.google_account_mode
+        if mode is GoogleAccountMode.LINKED_ONLY:
+            return None
+        if mode is GoogleAccountMode.PREAUTHORIZED:
+            return await self._login_preauthorized(transaction, claims, now, context)
+        if mode is GoogleAccountMode.OPEN:
+            return await self._login_open(transaction, claims, now, context)
+        raise ValueError(f"Unsupported Google account mode: {mode}")
 
     async def _login_preauthorized(
         self,
