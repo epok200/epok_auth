@@ -1,29 +1,28 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 
 from epok_auth import AuthSettings, EpokAuth
 from epok_auth.testing import MemoryAuthStore
 
-FRONTEND_ORIGIN = "http://localhost:8766"
+SANDBOX_ORIGIN = "http://localhost:8765"
 ADMIN_EMAIL = "browser@example.com"
 ADMIN_PASSWORD = "browser passkey proof password"
 EXAMPLE_DIR = Path(__file__).parent
 
 settings = AuthSettings.development(
-    trusted_origins=(FRONTEND_ORIGIN,),
+    trusted_origins=(SANDBOX_ORIGIN,),
     passkey_rp_id="localhost",
-    passkey_rp_name="EPOK browser proof",
+    passkey_rp_name="EPOK passkey sandbox",
 )
 auth = EpokAuth(settings=settings, store=MemoryAuthStore())
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     await auth.service.create_admin(
         email=ADMIN_EMAIL,
         display_name="Browser proof",
@@ -32,26 +31,23 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-api_app = FastAPI(title="epok-auth browser passkey proof", lifespan=lifespan)
-api_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", settings.csrf_header_name],
-)
+api_app = FastAPI(title="epok-auth passkey sandbox", lifespan=lifespan)
 auth.install(api_app, prefix="/api/v1/auth", include_passkeys=True)
-frontend_app = FastAPI(title="epok-auth browser passkey frontend")
 
 
-@frontend_app.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    return '<!doctype html><html><body><main id="result">ready</main></body></html>'
+@api_app.get("/", response_class=FileResponse)
+async def sandbox() -> Path:
+    return EXAMPLE_DIR / "sandbox.html"
 
 
-@frontend_app.get("/browser.js", response_class=FileResponse)
+@api_app.get("/browser.js", response_class=FileResponse)
 async def browser_helper() -> Path:
     return EXAMPLE_DIR / "browser.js"
+
+
+@api_app.get("/sandbox.js", response_class=FileResponse)
+async def sandbox_client() -> Path:
+    return EXAMPLE_DIR / "sandbox.js"
 
 
 @api_app.get("/health")

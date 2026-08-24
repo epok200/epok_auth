@@ -2,9 +2,10 @@
 
 This document maps beta capabilities to executable evidence. It is not a claim that vulnerabilities are impossible.
 
-## Candidate evidence snapshot
+## Published evidence snapshot
 
-The `0.2.1` release is accepted by the standalone library gate only after all of the following complete successfully on a clean GitHub runner:
+The published `0.2.1` release was accepted by the standalone library gate after all of the
+following completed successfully on a clean GitHub runner:
 
 - 205 tests pass, including PostgreSQL integration and concurrency cases;
 - the browser reference client passes a Node unit proof and a real Chromium flow;
@@ -18,6 +19,17 @@ The `0.2.1` release is accepted by the standalone library gate only after all of
 - the wheel installs into an isolated environment and its public API and CLI execute;
 - CodeQL `security-extended` completes successfully;
 - the aggregate `CI / merge-gate` is green.
+
+The Google rows below describe the unreleased `0.3` candidate. They do not claim that Google
+Sign-In exists in the published `0.2.1` artifact. The candidate is releasable only after its own
+clean `CI / merge-gate` and CodeQL run succeed.
+
+The current candidate passes 270 Python tests with disposable PostgreSQL, including five
+coordinated Google concurrency cases. Its 258 non-integration tests pass on Python 3.12, 3.13 and
+3.14, branch-aware coverage reaches 90.40%, and the passkey and Google Chromium flows pass. Ruff,
+Pyright, `pip-audit`, both npm audits, artifact allowlists and isolated base/full-extra installs are
+also clean. PostgreSQL 17, CodeQL and the aggregate merge gate remain required CI evidence before
+publication.
 
 ## Capability map
 
@@ -40,12 +52,21 @@ The `0.2.1` release is accepted by the standalone library gate only after all of
 | Passkey ownership | Discoverable `userHandle` matches the credential owner | real adapter adversarial tests |
 | Passkey lifecycle | Multiple credentials can be listed and individually revoked | service and HTTP flow tests |
 | Browser passkey client | Unit mocks cover binary conversion and headless Chromium completes the real six-route ceremony with a virtual WebAuthn authenticator | `browser.test.mjs`, `browser.e2e.test.mjs` |
+| Google token verification | The official client verifies a generated RS256 token against a live cached certificate endpoint | `tests/google/test_google_auth.py` |
+| Google nonce replay | Origin-bound challenges expire and are consumed before token verification | Google service and HTTP security tests |
+| Google account policy | Linked-only, preauthorized and open modes fail closed for unknown, unverified and non-authoritative emails | `tests/google/test_service_modes.py` |
+| Google email takeover defense | Existing unlinked email requires an administrative flag or recent explicit local link | Google mode and link tests |
+| Google domain policy | Hosted-domain allowlist applies to linking and every later login | `tests/google/test_service_security.py` |
+| Google concurrency | Concurrent first login creates one external identity and preserves valid sessions | memory and PostgreSQL integration tests |
+| Google recovery | Identity removal, temporary password, session revocation and event commit atomically | service, HTTP and PostgreSQL tests |
+| Google browser client | Chromium exercises the official-button contract, failure retry and real epok-auth cookies through the sandbox | `examples/google/browser.e2e.test.mjs` |
 | Last administrator | Concurrent operations cannot remove the final active admin | memory and PostgreSQL invariant tests |
 | Secret redaction | Validation and auth responses do not echo submitted secrets | HTTP and CLI tests |
 | Audit IP integrity | Direct clients cannot spoof event IPs with forwarding headers | HTTP abuse tests |
 | Configuration | Production rejects weak secrets, insecure cookies and ambiguous origins | `test_config.py` |
 | Migration safety | Empty-database migration commits and schema metadata remains drift-free | PostgreSQL 17 job and `test_migrate.py` |
 | Packaging | Built wheel imports and exposes CLI in an isolated environment | GitHub Actions package job |
+| Optional Google install | Base artifact imports without Google dependencies and the `google` extra loads the official adapter | artifact smoke tests |
 | Compatibility | Core suite passes Python 3.12, 3.13 and 3.14 | GitHub Actions matrix |
 | Persistence | Migrations, drift check and concurrency run against PostgreSQL 17 | GitHub Actions PostgreSQL job |
 | Dependencies | Locked installed environment has no known audited vulnerability | `pip-audit` quality step |

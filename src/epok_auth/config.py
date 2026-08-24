@@ -7,11 +7,19 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from epok_auth._validation import normalize_domain
+
 
 class Environment(StrEnum):
     DEVELOPMENT = "development"
     TEST = "test"
     PRODUCTION = "production"
+
+
+class GoogleAccountMode(StrEnum):
+    LINKED_ONLY = "linked_only"
+    PREAUTHORIZED = "preauthorized"
+    OPEN = "open"
 
 
 _UNSAFE_SECRETS = frozenset(
@@ -83,6 +91,14 @@ class AuthSettings(BaseSettings):
     passkey_timeout_ms: int = Field(default=60_000, ge=15_000, le=300_000)
     passkey_registration_max_age_seconds: int = Field(default=300, ge=0, le=3600)
     passkey_max_credentials_per_user: int = Field(default=10, ge=1, le=50)
+
+    google_client_id: str | None = Field(default=None, min_length=20, max_length=255)
+    google_account_mode: GoogleAccountMode = GoogleAccountMode.LINKED_ONLY
+    google_hosted_domains: tuple[str, ...] = ()
+    google_challenge_ttl_seconds: int = Field(default=300, ge=60, le=600)
+    google_link_max_age_seconds: int = Field(default=300, ge=60, le=3600)
+    google_token_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    google_max_credential_chars: int = Field(default=8192, ge=1024, le=16384)
 
     admin_role: str = Field(default="admin", min_length=1, max_length=100)
     default_user_role: str = Field(default="user", min_length=1, max_length=100)
@@ -161,24 +177,10 @@ class AuthSettings(BaseSettings):
     def normalize_passkey_rp_id(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        candidate = value.strip().rstrip(".").casefold()
-        if not candidate or "://" in candidate or any(mark in candidate for mark in "/:#?@"):
-            raise ValueError("passkey_rp_id must be a domain without scheme, port or path")
         try:
-            normalized = candidate.encode("idna").decode("ascii")
-        except UnicodeError as error:
+            return normalize_domain(value)
+        except ValueError as error:
             raise ValueError("passkey_rp_id must be a valid domain") from error
-        labels = normalized.split(".")
-        if len(normalized) > 253 or any(
-            not label
-            or len(label) > 63
-            or label.startswith("-")
-            or label.endswith("-")
-            or re.fullmatch(r"[a-z0-9-]+", label) is None
-            for label in labels
-        ):
-            raise ValueError("passkey_rp_id must be a valid domain")
-        return normalized
 
     @field_validator("passkey_rp_name")
     @classmethod
@@ -189,6 +191,36 @@ class AuthSettings(BaseSettings):
         if not stripped or any(ord(character) < 32 for character in stripped):
             raise ValueError("passkey_rp_name must be printable text")
         return stripped
+
+    @field_validator("google_client_id")
+    @classmethod
+    def normalize_google_client_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized.endswith(".apps.googleusercontent.com") or any(
+            ord(character) < 33 for character in normalized
+        ):
+            raise ValueError("google_client_id must be a Google OAuth web client ID")
+        return normalized
+
+    @field_validator("google_hosted_domains", mode="before")
+    @classmethod
+    def parse_google_hosted_domains(cls, value: object) -> object:
+        if isinstance(value, str):
+            return tuple(part.strip() for part in value.split(",") if part.strip())
+        return value
+
+    @field_validator("google_hosted_domains")
+    @classmethod
+    def normalize_google_hosted_domains(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        try:
+            normalized = tuple(normalize_domain(item) for item in value)
+        except ValueError as error:
+            raise ValueError("google_hosted_domains must contain valid domains") from error
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("google_hosted_domains must not contain duplicates")
+        return normalized
 
     @field_validator("refresh_cookie_name", "csrf_cookie_name", "csrf_header_name")
     @classmethod
@@ -214,6 +246,11 @@ class AuthSettings(BaseSettings):
             raise ValueError("refresh idle TTL cannot exceed the absolute session TTL")
         if self.password_min_length > self.password_max_length:
             raise ValueError("password_min_length cannot exceed password_max_length")
+        if (
+            self.google_account_mode is GoogleAccountMode.OPEN
+            and self.default_user_role == self.admin_role
+        ):
+            raise ValueError("open Google accounts cannot receive the administrative role")
         if self.effective_refresh_cookie_name == self.effective_csrf_cookie_name:
             raise ValueError("refresh and CSRF cookie names must be different")
         if self.cookie_same_site == "none" and not self.secure_cookies:

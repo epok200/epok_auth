@@ -1,13 +1,13 @@
 [project]
 name = "epok-auth"
 version = "0.2.1"
-description = "FastAPI authentication with revocable PostgreSQL sessions and WebAuthn passkeys."
+description = "FastAPI authentication with revocable sessions, passkeys and Google Sign-In."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "EPOK" }]
-keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql", "passkeys", "webauthn"]
+keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql", "passkeys", "webauthn", "google"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Framework :: FastAPI",
@@ -42,11 +42,17 @@ postgres = [
 ]
 all = [
   "alembic>=1.17,<2",
+  "CacheControl>=0.14,<1",
+  "google-auth[requests]>=2.56,<3",
   "greenlet>=3.0,<4",
   "Mako>=1.3,<1.4",
   "psycopg[binary,pool]>=3.2,<4",
   "SQLAlchemy>=2.0.45,<2.1",
   "webauthn>=3.0,<4",
+]
+google = [
+  "CacheControl>=0.14,<1",
+  "google-auth[requests]>=2.56,<3",
 ]
 passkeys = [
   "webauthn>=3.0,<4",
@@ -124,6 +130,7 @@ ignore = ["PLR0913", "PLR2004", "S101"]
 "tests/**/*.py" = ["B008", "PLC0415", "S105", "S106", "S107", "PLR2004"]
 "tests/test_errors.py" = ["S301", "S403"]
 "tests/test_postgres_integration.py" = ["E402"]
+"tests/test_google_postgres_integration.py" = ["E402"]
 "tests/test_tokens.py" = ["DTZ001"]
 "scripts/publish.py" = ["PLR0912", "PLR0915", "S105", "S404"]
 "scripts/release_support.py" = ["S105"]

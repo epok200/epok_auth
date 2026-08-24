@@ -83,6 +83,20 @@ def invalid_session() -> AuthError:
     )
 
 
+def invalid_google_credentials() -> AuthError:
+    return AuthError(
+        AuthErrorCode.GOOGLE_CREDENTIAL_INVALID,
+        "Google authentication is not valid.",
+    )
+
+
+def google_identity_conflict() -> AuthError:
+    return AuthError(
+        AuthErrorCode.GOOGLE_IDENTITY_CONFLICT,
+        "The Google identity cannot be linked to this account.",
+    )
+
+
 def invalid_csrf() -> AuthError:
     return AuthError(
         AuthErrorCode.INVALID_CSRF,

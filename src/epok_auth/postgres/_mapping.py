@@ -2,6 +2,11 @@ from typing import Any
 
 from sqlalchemy.engine import RowMapping
 
+from epok_auth.google.models import (
+    ExternalIdentity,
+    GoogleChallenge,
+    GoogleChallengePurpose,
+)
 from epok_auth.models import RefreshSession, UserAccount, UserStatus
 from epok_auth.passkeys.models import (
     PasskeyCeremonyPurpose,
@@ -22,6 +27,8 @@ def user_values(user: UserAccount) -> SqlValues:
         "roles": list(user.roles),
         "scopes": list(user.scopes),
         "must_change_password": user.must_change_password,
+        "password_login_enabled": user.password_login_enabled,
+        "google_auto_link_allowed": user.google_auto_link_allowed,
         "failed_login_attempts": user.failed_login_attempts,
         "locked_until": user.locked_until,
         "password_changed_at": user.password_changed_at,
@@ -78,6 +85,32 @@ def challenge_values(challenge: PasskeyChallenge) -> SqlValues:
     }
 
 
+def google_challenge_values(challenge: GoogleChallenge) -> SqlValues:
+    return {
+        "id": challenge.id,
+        "purpose": challenge.purpose.value,
+        "nonce": challenge.nonce,
+        "origin": challenge.origin,
+        "client_id": challenge.client_id,
+        "user_id": challenge.user_id,
+        "created_at": challenge.created_at,
+        "expires_at": challenge.expires_at,
+        "consumed_at": challenge.consumed_at,
+    }
+
+
+def external_identity_values(identity: ExternalIdentity) -> SqlValues:
+    return {
+        "id": identity.id,
+        "user_id": identity.user_id,
+        "issuer": identity.issuer,
+        "subject": identity.subject,
+        "email": identity.email,
+        "created_at": identity.created_at,
+        "last_login_at": identity.last_login_at,
+    }
+
+
 def user_from_row(row: RowMapping) -> UserAccount:
     return UserAccount(
         id=row["id"],
@@ -88,6 +121,8 @@ def user_from_row(row: RowMapping) -> UserAccount:
         roles=tuple(row["roles"] or ()),
         scopes=tuple(row["scopes"] or ()),
         must_change_password=row["must_change_password"],
+        password_login_enabled=row["password_login_enabled"],
+        google_auto_link_allowed=row["google_auto_link_allowed"],
         failed_login_attempts=row["failed_login_attempts"],
         locked_until=row["locked_until"],
         password_changed_at=row["password_changed_at"],
@@ -141,4 +176,30 @@ def challenge_from_row(row: RowMapping) -> PasskeyChallenge:
         created_at=row["created_at"],
         expires_at=row["expires_at"],
         consumed_at=row["consumed_at"],
+    )
+
+
+def google_challenge_from_row(row: RowMapping) -> GoogleChallenge:
+    return GoogleChallenge(
+        id=row["id"],
+        purpose=GoogleChallengePurpose(row["purpose"]),
+        nonce=row["nonce"],
+        origin=row["origin"],
+        client_id=row["client_id"],
+        user_id=row["user_id"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        consumed_at=row["consumed_at"],
+    )
+
+
+def external_identity_from_row(row: RowMapping) -> ExternalIdentity:
+    return ExternalIdentity(
+        id=row["id"],
+        user_id=row["user_id"],
+        issuer=row["issuer"],
+        subject=row["subject"],
+        email=row["email"],
+        created_at=row["created_at"],
+        last_login_at=row["last_login_at"],
     )

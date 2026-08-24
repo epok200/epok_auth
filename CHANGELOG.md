@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- add optional Google Sign-In through the official `google-auth` verifier;
+- add linked-only, preauthorized and open account policies with safe defaults;
+- persist canonical external identities and origin-bound, single-use nonce challenges;
+- add explicit account linking and atomic administrative recovery;
+- reject in-flight links after recovery revokes their persisted session;
+- standardize user and session lock ordering across link, recovery and refresh;
+- reject open registration when the default role equals the administrative role;
+- prevent password attempts from locking Google-only accounts;
+- add HTTP, policy, concurrency, protocol, PostgreSQL and browser flow tests;
+- add a local Google button sandbox and Spanish integration guide.
+
 ## 0.2.1 - 2026-08-21
 
 - correct the public release status, installation command and validation evidence;

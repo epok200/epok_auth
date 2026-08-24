@@ -31,6 +31,7 @@ class CreateUserRequest(StrictSchema):
     display_name: ShortText
     roles: list[Capability] | None = Field(default=None, max_length=256)
     scopes: list[Capability] = Field(default_factory=list, max_length=2048)
+    google_auto_link_allowed: bool = False
 
 
 class UpdateUserRequest(StrictSchema):
@@ -38,6 +39,7 @@ class UpdateUserRequest(StrictSchema):
     status: UserStatus | None = None
     roles: list[Capability] | None = Field(default=None, max_length=256)
     scopes: list[Capability] | None = Field(default=None, max_length=2048)
+    google_auto_link_allowed: bool | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -76,6 +78,8 @@ class UserResponse(BaseModel):
     roles: list[str]
     scopes: list[str]
     must_change_password: bool
+    password_login_enabled: bool
+    google_auto_link_allowed: bool
     failed_login_attempts: int
     locked_until: datetime | None
     password_changed_at: datetime | None
@@ -92,6 +96,8 @@ class UserResponse(BaseModel):
             roles=list(user.roles),
             scopes=list(user.scopes),
             must_change_password=user.must_change_password,
+            password_login_enabled=user.password_login_enabled,
+            google_auto_link_allowed=user.google_auto_link_allowed,
             failed_login_attempts=user.failed_login_attempts,
             locked_until=user.locked_until,
             password_changed_at=user.password_changed_at,

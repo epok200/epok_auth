@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>EPOK Passkey Lab</title>
+    <style>
+      :root {
+        --ink: #090d0d;
+        --panel: #151d1b;
+        --paper: #f3f0e4;
+        --muted: #93a19c;
+        --acid: #d6ff43;
+        --cyan: #62e7ff;
+        --danger: #ff6b57;
+        --line: rgba(243, 240, 228, 0.14);
+        --display: "Bodoni 72", Didot, "Times New Roman", serif;
+        --body: "Avenir Next", Avenir, "Trebuchet MS", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: var(--paper);
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          radial-gradient(circle at 12% 12%, rgba(98, 231, 255, 0.13), transparent 28rem),
+          var(--ink);
+        background-size: 48px 48px, 48px 48px, auto, auto;
+        font-family: var(--body);
+      }
+
+      main {
+        display: grid;
+        min-height: 100vh;
+        grid-template-columns: minmax(0, 1.1fr) minmax(22rem, 0.9fr);
+      }
+
+      .intro,
+      .console {
+        padding: clamp(2rem, 6vw, 6rem);
+      }
+
+      .intro {
+        position: relative;
+        display: flex;
+        min-height: 38rem;
+        overflow: hidden;
+        flex-direction: column;
+        justify-content: space-between;
+        border-right: 1px solid var(--line);
+      }
+
+      .eyebrow,
+      .label {
+        margin: 0;
+        color: var(--acid);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 12ch;
+        margin: 2rem 0 1.5rem;
+        font-family: var(--display);
+        font-size: clamp(4rem, 10vw, 8.6rem);
+        font-weight: 400;
+        letter-spacing: -0.065em;
+        line-height: 0.78;
+      }
+
+      h1 em {
+        color: var(--cyan);
+        font-weight: 400;
+      }
+
+      .summary {
+        max-width: 34rem;
+        margin: 0;
+        color: #bcc6c2;
+        font-size: clamp(1rem, 1.5vw, 1.25rem);
+        line-height: 1.7;
+      }
+
+      .orbit {
+        position: absolute;
+        right: -8rem;
+        bottom: -10rem;
+        width: min(36vw, 30rem);
+        aspect-ratio: 1;
+        border: 1px solid rgba(98, 231, 255, 0.3);
+        border-radius: 50%;
+        animation: breathe 7s ease-in-out infinite;
+      }
+
+      .orbit::before,
+      .orbit::after {
+        position: absolute;
+        border: 1px solid rgba(214, 255, 67, 0.24);
+        border-radius: inherit;
+        content: "";
+      }
+
+      .orbit::before {
+        inset: 18%;
+      }
+
+      .orbit::after {
+        inset: 36%;
+        background: var(--acid);
+        box-shadow: 0 0 70px rgba(214, 255, 67, 0.28);
+      }
+
+      .console {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: rgba(9, 13, 13, 0.55);
+        backdrop-filter: blur(18px);
+      }
+
+      .console header {
+        display: flex;
+        margin-bottom: 2rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .live {
+        color: var(--muted);
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .live::before {
+        display: inline-block;
+        width: 0.55rem;
+        height: 0.55rem;
+        margin-right: 0.6rem;
+        border-radius: 50%;
+        background: var(--acid);
+        box-shadow: 0 0 18px var(--acid);
+        content: "";
+      }
+
+      .account,
+      .session {
+        padding: 1.2rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .account strong {
+        display: block;
+        margin-top: 0.35rem;
+        font-weight: 500;
+      }
+
+      .step {
+        display: grid;
+        padding: 1.4rem 0;
+        grid-template-columns: 2.7rem 1fr;
+        gap: 1rem;
+        border-top: 1px solid var(--line);
+      }
+
+      .number {
+        color: var(--cyan);
+        font: 2.3rem/1 var(--display);
+      }
+
+      h2 {
+        margin: 0.3rem 0 0.5rem;
+        font: 400 1.8rem/1.1 var(--display);
+      }
+
+      .step p {
+        margin: 0 0 1.1rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+
+      button {
+        width: 100%;
+        min-height: 3.3rem;
+        border: 1px solid var(--paper);
+        color: var(--ink);
+        background: var(--paper);
+        cursor: pointer;
+        font: 700 0.76rem/1 var(--body);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+      }
+
+      #login-button {
+        border-color: var(--acid);
+        background: var(--acid);
+      }
+
+      button:hover:not(:disabled) {
+        color: var(--paper);
+        background: transparent;
+        transform: translateY(-2px);
+      }
+
+      button:focus-visible {
+        outline: 3px solid var(--cyan);
+        outline-offset: 3px;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.45;
+      }
+
+      .status {
+        min-height: 3.5rem;
+        padding: 1rem;
+        margin: 0.8rem 0;
+        border-left: 3px solid var(--muted);
+        color: #c3ccc9;
+        background: rgba(255, 255, 255, 0.035);
+        font-size: 0.88rem;
+        line-height: 1.5;
+      }
+
+      .status[data-tone="working"] {
+        border-color: var(--cyan);
+      }
+
+      .status[data-tone="success"] {
+        border-color: var(--acid);
+        color: var(--acid);
+      }
+
+      .status[data-tone="error"] {
+        border-color: var(--danger);
+        color: #ffaca1;
+      }
+
+      .session {
+        border-color: rgba(214, 255, 67, 0.35);
+      }
+
+      .session[hidden] {
+        display: none;
+      }
+
+      .session p,
+      .note {
+        margin: 0.3rem 0;
+        color: #a7b3af;
+        font-size: 0.78rem;
+      }
+
+      .note {
+        margin-top: 1.2rem;
+        line-height: 1.5;
+      }
+
+      @keyframes breathe {
+        50% {
+          transform: scale(1.05);
+          opacity: 0.72;
+        }
+      }
+
+      @media (max-width: 800px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+
+        .intro {
+          min-height: 30rem;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .orbit {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">EPOK Auth / Local credential lab</p>
+          <h1 id="page-title">Tu llave eres <em>tú.</em></h1>
+          <p class="summary">
+            Prueba el ciclo WebAuthn en dos pasos. La cuenta vive en memoria y desaparece
+            cuando detienes el servidor.
+          </p>
+        </div>
+        <div class="orbit" aria-hidden="true"></div>
+      </section>
+
+      <section class="console" aria-label="Prueba de acceso con passkey">
+        <header>
+          <p class="eyebrow">Passkey sandbox</p>
+          <span class="live">Solo local</span>
+        </header>
+
+        <div class="account">
+          <p class="label">Cuenta temporal</p>
+          <strong>browser@example.com</strong>
+        </div>
+
+        <article class="step">
+          <span class="number">01</span>
+          <div>
+            <p class="label">Preparación</p>
+            <h2>Crea tu passkey</h2>
+            <p>Chrome guardará una credencial local para esta cuenta temporal.</p>
+            <button id="register-button" type="button">Crear passkey de prueba</button>
+          </div>
+        </article>
+
+        <article class="step">
+          <span class="number">02</span>
+          <div>
+            <p class="label">Acceso real</p>
+            <h2>Entra sin contraseña</h2>
+            <p>Chrome firma el challenge con tu passkey y obtiene una sesión nueva.</p>
+            <button id="login-button" type="button">Entrar con passkey</button>
+          </div>
+        </article>
+
+        <div class="status" id="status" data-tone="idle" role="status" aria-live="polite">
+          Empieza creando una passkey de prueba.
+        </div>
+
+        <section class="session" id="session-result" aria-label="Sesión confirmada" hidden>
+          <p class="label">Sesión verificada</p>
+          <h2 id="result-name"></h2>
+          <p id="result-email"></p>
+          <p>Autenticación: <time id="result-time"></time></p>
+        </section>
+
+        <p class="note">
+          Entorno aislado. No usa PostgreSQL, no persiste usuarios y no envía datos fuera de
+          localhost.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="/sandbox.js"></script>
+  </body>
+</html>

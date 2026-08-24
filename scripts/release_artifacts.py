@@ -171,7 +171,7 @@ def verify_public_install(
     *,
     attempts: int = 6,
 ) -> None:
-    requirement = f"{PROJECT_NAME}[postgres,passkeys]=={context.version}"
+    requirement = f"{PROJECT_NAME}[google,postgres,passkeys]=={context.version}"
     command = [
         context.tools.uv,
         "run",
@@ -185,8 +185,11 @@ def verify_public_install(
         "-c",
         (
             "import epok_auth\n"
+            "import google.auth\n"
             "import webauthn\n"
+            "from epok_auth.google.google_auth import GoogleAuthVerifier\n"
             "from epok_auth.passkeys.webauthn import WebAuthnAdapter\n"
+            "assert GoogleAuthVerifier is not None\n"
             "print(epok_auth.__version__)"
         ),
     ]
@@ -295,7 +298,7 @@ def _smoke_test_artifact(
         context,
         artifact,
         passkey_environment,
-        extra="postgres,passkeys",
+        extra="google,postgres,passkeys",
     )
     pipeline.run(
         f"Verify documented extras from {artifact.name}",
@@ -344,9 +347,10 @@ def _base_check_code() -> str:
             "expected = os.environ['EPOK_AUTH_EXPECTED_VERSION']",
             "assert version('epok-auth') == expected == epok_auth.__version__",
             "assert find_spec('webauthn') is None",
+            "assert find_spec('google') is None",
             (
                 "assert files('epok_auth.migrations').joinpath('versions', "
-                "'0002_passkeys.py').is_file()"
+                "'0003_google_identity.py').is_file()"
             ),
             "auth = EpokAuth(settings=AuthSettings.development(), store=MemoryAuthStore())",
             "try:",
@@ -355,6 +359,17 @@ def _base_check_code() -> str:
             "    assert 'epok-auth[passkeys]' in str(error)",
             "else:",
             "    raise AssertionError('passkeys enabled without optional dependency')",
+            (
+                "google_settings = AuthSettings.development(google_client_id="
+                "'123456789-test.apps.googleusercontent.com')"
+            ),
+            "google_auth = EpokAuth(settings=google_settings, store=MemoryAuthStore())",
+            "try:",
+            "    google_auth.install(FastAPI(), include_google=True)",
+            "except RuntimeError as error:",
+            "    assert 'epok-auth[google]' in str(error)",
+            "else:",
+            "    raise AssertionError('Google enabled without optional dependency')",
         )
     )
 
@@ -363,11 +378,13 @@ def _passkey_check_code() -> str:
     return "\n".join(
         (
             "from epok_auth import PasskeyService",
+            "from epok_auth.google.google_auth import GoogleAuthVerifier",
             "from epok_auth.passkeys.webauthn import WebAuthnAdapter",
             "from epok_auth.postgres import PostgresAuthStore",
             "adapter = WebAuthnAdapter(rp_id='localhost', rp_name='EPOK', timeout_ms=60000)",
             "assert adapter.authentication_options(b'a' * 32)['challenge']",
             "assert PasskeyService is not None",
+            "assert GoogleAuthVerifier is not None",
             "assert PostgresAuthStore is not None",
         )
     )

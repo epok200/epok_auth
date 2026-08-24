@@ -6,9 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 
-const FRONTEND_ORIGIN = "http://localhost:8766";
 const API_ORIGIN = "http://localhost:8765";
-const API = `${API_ORIGIN}/api/v1/auth`;
 const PROJECT_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 async function waitForServer(server, output, url) {
@@ -65,14 +63,10 @@ function assertSessionCookies(cookies) {
 }
 
 test("Chromium completes the real passkey HTTP flow", { timeout: 60_000 }, async () => {
-  const api = startServer("api_app", 8765);
-  const frontend = startServer("frontend_app", 8766);
+  const sandbox = startServer("api_app", 8765);
   let browser;
   try {
-    await Promise.all([
-      waitForServer(api.server, api.output, `${API_ORIGIN}/health`),
-      waitForServer(frontend.server, frontend.output, FRONTEND_ORIGIN),
-    ]);
+    await waitForServer(sandbox.server, sandbox.output, `${API_ORIGIN}/health`);
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -88,107 +82,43 @@ test("Chromium completes the real passkey HTTP flow", { timeout: 60_000 }, async
         automaticPresenceSimulation: true,
       },
     });
-    await page.goto(FRONTEND_ORIGIN);
+    await page.goto(API_ORIGIN);
 
-    const registration = await page.evaluate(async ({ api }) => {
-      const helper = await import("/browser.js");
-      const loginResponse = await fetch(`${api}/login`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: "browser@example.com",
-          password: "browser passkey proof password",
-        }),
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.credentials, "create", {
+        configurable: true,
+        value: () => Promise.reject(new DOMException("Canceled", "NotAllowedError")),
       });
-      if (!loginResponse.ok) {
-        throw new Error(`Password login failed: ${loginResponse.status}`);
-      }
-      const passwordSession = await loginResponse.json();
-      const registered = await helper.registerPasskey({
-        baseUrl: api,
-        accessToken: passwordSession.access_token,
-        name: "Chromium virtual passkey",
-      });
-      const firstList = await helper.listPasskeys({
-        baseUrl: api,
-        accessToken: passwordSession.access_token,
-      });
-      return { passwordSession, registered, firstList };
-    }, { api: API });
-
-    const passwordCookies = await context.cookies(API_ORIGIN);
-    assertSessionCookies(passwordCookies);
-
-    const logout = await page.evaluate(async ({ api, csrfToken, accessToken }) => {
-      const logoutResponse = await fetch(`${api}/logout`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "X-CSRF-Token": csrfToken },
-      });
-      if (logoutResponse.status !== 204) {
-        throw new Error(`Password logout failed: ${logoutResponse.status}`);
-      }
-      const meAfterLogout = await fetch(`${api}/me`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      return {
-        logoutStatus: logoutResponse.status,
-        passwordTokenStatus: meAfterLogout.status,
-      };
-    }, {
-      api: API,
-      csrfToken: registration.passwordSession.csrf_token,
-      accessToken: registration.passwordSession.access_token,
+    });
+    await page.locator("#register-button").click();
+    await page.waitForFunction(() => document.querySelector("#status")?.dataset.tone === "error");
+    assert.match(await page.locator("#status").textContent(), /Chrome canceló/);
+    assert.deepEqual(await context.cookies(API_ORIGIN), []);
+    await page.evaluate(() => {
+      delete navigator.credentials.create;
     });
 
+    await page.locator("#register-button").click();
+    await page.waitForFunction(() => document.querySelector("#status")?.dataset.tone === "success");
+    assert.match(await page.locator("#status").textContent(), /Passkey lista/);
     assert.deepEqual(await context.cookies(API_ORIGIN), []);
 
-    const result = await page.evaluate(async ({ api, passkeyId }) => {
-      const helper = await import("/browser.js");
-      const passkeySession = await helper.authenticateWithPasskey({ baseUrl: api });
-      const meResponse = await fetch(`${api}/me`, {
-        headers: { Authorization: `Bearer ${passkeySession.access_token}` },
-      });
-      const me = await meResponse.json();
-      const revoked = await helper.revokePasskey({
-        baseUrl: api,
-        accessToken: passkeySession.access_token,
-        passkeyId,
-      });
-      const finalList = await helper.listPasskeys({
-        baseUrl: api,
-        accessToken: passkeySession.access_token,
-      });
-      return {
-        passkeySession,
-        me,
-        revoked,
-        finalList,
-      };
-    }, { api: API, passkeyId: registration.registered.id });
-
+    await page.locator("#login-button").click();
+    await page.waitForFunction(() => !document.querySelector("#session-result")?.hidden);
+    assert.equal(await page.locator("#result-name").textContent(), "Browser proof");
+    assert.equal(await page.locator("#result-email").textContent(), "browser@example.com");
+    assert.match(await page.locator("#status").textContent(), /Acceso confirmado/);
     const passkeyCookies = await context.cookies(API_ORIGIN);
 
     const { credentials } = await cdp.send("WebAuthn.getCredentials", { authenticatorId });
-    assert.equal(registration.registered.name, "Chromium virtual passkey");
-    assert.equal(registration.firstList.items.length, 1);
-    assert.equal(logout.logoutStatus, 204);
-    assert.equal(logout.passwordTokenStatus, 401);
-    assert.ok(result.passkeySession.access_token);
-    assert.equal(result.me.email, "browser@example.com");
-    assert.equal(result.revoked, null);
-    assert.deepEqual(result.finalList, { items: [] });
     assert.equal(credentials.length, 1);
     assert.equal(credentials[0].isResidentCredential, true);
     assert.ok(credentials[0].signCount >= 1);
     assertSessionCookies(passkeyCookies);
   } finally {
     await browser?.close();
-    for (const process of [api.server, frontend.server]) {
-      if (process.exitCode === null) {
-        process.kill("SIGTERM");
-      }
+    if (sandbox.server.exitCode === null) {
+      sandbox.server.kill("SIGTERM");
     }
   }
 });

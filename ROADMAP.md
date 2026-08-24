@@ -8,21 +8,28 @@ Local users, administrative provisioning, Argon2id, short access JWTs, opaque ro
 
 WebAuthn registration and discoverable authentication, multiple credentials, factor
 revocation, single-use challenges, PostgreSQL persistence, FastAPI APIs and a browser
-reference client. Implemented in the current unreleased candidate.
+reference client. Published in `0.2.1`.
 
-## 0.3 - Invitations and recovery
+## 0.3 - Google Sign-In
+
+Google Identity Services, ID token verification with the official client, external identities keyed
+by issuer and subject, linked-only, preauthorized and open account policies, explicit linking,
+administrative recovery, PostgreSQL persistence and a browser sandbox. Implemented in the current
+unreleased branch.
+
+## 0.4 - Invitations and recovery
 
 One-time invitation tokens, recovery workflows, callback interfaces for email/WhatsApp, user-visible session/device management, recovery codes and optional Redis coordination/rate limiting.
 
-## 0.4 - OpenID Connect
+## 0.5 - Generic OpenID Connect
 
-Google OIDC, external identities keyed by issuer and subject, preauthorized B2B account linking and provider interfaces based on standard OIDC clients.
+Additional OIDC providers and provider interfaces based on standard OIDC clients.
 
-## 0.5 - MFA and step-up
+## 0.6 - MFA and step-up
 
 TOTP, recovery codes, factor administration, recent-authentication policies and step-up requirements for sensitive operations.
 
-## 0.6 - Distributed verification
+## 0.7 - Distributed verification
 
 Asymmetric signing, `kid`, JWKS, key rotation, distributed API validation and optional Redis-backed coordination.
 

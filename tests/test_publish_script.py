@@ -132,15 +132,17 @@ def test_parse_docker_port_rejects_invalid_output() -> None:
         publish.parse_docker_port("not-a-port")
 
 
-def test_artifact_smoke_contract_covers_base_and_passkey_installs() -> None:
+def test_artifact_smoke_contract_covers_base_and_optional_installs() -> None:
     base_code = release_artifacts._base_check_code()
     passkey_code = release_artifacts._passkey_check_code()
 
     compile(base_code, "<base-smoke>", "exec")
     compile(passkey_code, "<passkey-smoke>", "exec")
     assert "find_spec('webauthn') is None" in base_code
-    assert "0002_passkeys.py" in base_code
+    assert "find_spec('google') is None" in base_code
+    assert "0003_google_identity.py" in base_code
     assert "WebAuthnAdapter" in passkey_code
+    assert "GoogleAuthVerifier" in passkey_code
     assert "PostgresAuthStore" in passkey_code
 
 
@@ -188,7 +190,7 @@ def test_artifact_validator_rejects_private_wheel_paths(
         release_artifacts.ArtifactValidator.validate(wheel, sdist)
 
 
-def test_public_verification_installs_postgres_and_passkeys() -> None:
+def test_public_verification_installs_all_documented_extras() -> None:
     pipeline = Mock()
     pipeline.run.return_value = SimpleNamespace(returncode=0, stdout="0.2.0\n")
     context = publish.ReleaseContext(
@@ -201,7 +203,43 @@ def test_public_verification_installs_postgres_and_passkeys() -> None:
     release_artifacts.verify_public_install(pipeline, context, attempts=1)
 
     command = pipeline.run.call_args.args[1]
-    assert "epok-auth[postgres,passkeys]==0.2.0" in command
+    assert "epok-auth[google,postgres,passkeys]==0.2.0" in command
+
+
+def test_local_release_gate_runs_the_google_browser_proof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class GateReachedPostgresError(Exception):
+        pass
+
+    def stop_before_postgres(*args: object) -> None:
+        del args
+        raise GateReachedPostgresError
+
+    pipeline = Mock()
+    context = publish.ReleaseContext(
+        publish.Toolchain(git="git", uv="uv", docker="docker", node="node", npm="npm"),
+        version="0.2.0",
+        commit="abcdef",
+        publish_token=None,
+    )
+    monkeypatch.setattr(publish, "SUPPORTED_PYTHONS", ())
+    monkeypatch.setattr(publish, "_start_postgres", stop_before_postgres)
+
+    with pytest.raises(GateReachedPostgresError):
+        publish._run_quality_and_tests(pipeline, context)
+
+    commands = [call.args[1] for call in pipeline.run.call_args_list]
+    assert ["npm", "ci", "--prefix", "examples/google"] in commands
+    assert [
+        "npm",
+        "audit",
+        "--prefix",
+        "examples/google",
+        "--audit-level",
+        "high",
+    ] in commands
+    assert ["node", "--test", "examples/google/browser.e2e.test.mjs"] in commands
 
 
 def test_publish_arguments_never_contain_the_token() -> None:

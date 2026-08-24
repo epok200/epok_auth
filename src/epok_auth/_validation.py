@@ -33,6 +33,27 @@ def normalize_display_name(value: str) -> str:
     return normalized
 
 
+def normalize_domain(value: str) -> str:
+    candidate = value.strip().rstrip(".").casefold()
+    if not candidate or "://" in candidate or any(mark in candidate for mark in "/:#?@"):
+        raise ValueError("domain must not contain scheme, port, user info, or path")
+    try:
+        normalized = candidate.encode("idna").decode("ascii")
+    except UnicodeError as error:
+        raise ValueError("domain is not valid") from error
+    labels = normalized.split(".")
+    if len(normalized) > 253 or any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or re.fullmatch(r"[a-z0-9-]+", label) is None
+        for label in labels
+    ):
+        raise ValueError("domain is not valid")
+    return normalized
+
+
 def normalize_capabilities(values: Sequence[str], *, maximum: int) -> tuple[str, ...]:
     if len(values) > maximum:
         raise AuthError(AuthErrorCode.INPUT_INVALID, "Too many capabilities.", status_code=422)

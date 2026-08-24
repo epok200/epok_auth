@@ -38,6 +38,12 @@ class SecurityEventType(StrEnum):
     PASSKEY_LOGIN_SUCCEEDED = "passkey.login_succeeded"
     PASSKEY_LOGIN_FAILED = "passkey.login_failed"
     PASSKEY_REVOKED = "passkey.revoked"
+    GOOGLE_ACCOUNT_CREATED = "google.account_created"
+    GOOGLE_IDENTITY_LINKED = "google.identity_linked"
+    GOOGLE_LINK_FAILED = "google.link_failed"
+    GOOGLE_LOGIN_SUCCEEDED = "google.login_succeeded"
+    GOOGLE_LOGIN_FAILED = "google.login_failed"
+    GOOGLE_RECOVERY_COMPLETED = "google.recovery_completed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +56,8 @@ class UserAccount:
     roles: tuple[str, ...] = ()
     scopes: tuple[str, ...] = ()
     must_change_password: bool = False
+    password_login_enabled: bool = True
+    google_auto_link_allowed: bool = False
     failed_login_attempts: int = 0
     locked_until: datetime | None = None
     password_changed_at: datetime | None = None
@@ -172,6 +180,7 @@ class UserUpdate:
     status: UserStatus | None = None
     roles: tuple[str, ...] | None = None
     scopes: tuple[str, ...] | None = None
+    google_auto_link_allowed: bool | None = None
 
 
 def _bounded(value: str | None, maximum: int) -> str | None:
