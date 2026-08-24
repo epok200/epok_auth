@@ -61,13 +61,17 @@ async def test_registration_lists_and_revokes_passkey(
     clock: MutableClock,
 ) -> None:
     _, passkeys, bundle = await ready_services(store, settings, clock)
+    initial_version = store.users[bundle.principal.user_id].security_version
 
     options, credential = await register_passkey(passkeys, bundle.principal)
+    registered_version = store.users[bundle.principal.user_id].security_version
     listed = await passkeys.list_passkeys(bundle.principal)
     await passkeys.revoke_passkey(bundle.principal, credential.id, ORIGIN)
 
     assert options.public_key["challenge"]
     assert listed == (credential,)
+    assert registered_version == initial_version + 1
+    assert store.users[bundle.principal.user_id].security_version == registered_version + 1
     assert await passkeys.list_passkeys(bundle.principal) == ()
     assert store.passkeys[credential.id].revoked_at == clock.value
     assert SecurityEventType.PASSKEY_REGISTERED in {event.event_type for event in store.events}

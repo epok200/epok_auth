@@ -22,7 +22,7 @@ actualización mayor puede revisarse sin cambiar el dominio, los stores ni la AP
 Instala PostgreSQL y passkeys con un solo comando:
 
 ```bash
-uv add "epok-auth[postgres,passkeys]==0.3.0"
+uv add "epok-auth[postgres,passkeys]==0.4.0"
 ```
 
 Para validar el código fuente desde este repositorio, usa el wheel o sdist generado por

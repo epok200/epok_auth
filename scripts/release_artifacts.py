@@ -343,6 +343,7 @@ def _base_check_code() -> str:
             "import epok_auth",
             "from fastapi import FastAPI",
             "from epok_auth import AuthSettings, EpokAuth",
+            "from epok_auth.email_links import AuthEmail, PendingEmailLink",
             "from epok_auth.testing import MemoryAuthStore",
             "expected = os.environ['EPOK_AUTH_EXPECTED_VERSION']",
             "assert version('epok-auth') == expected == epok_auth.__version__",
@@ -350,7 +351,7 @@ def _base_check_code() -> str:
             "assert find_spec('google') is None",
             (
                 "assert files('epok_auth.migrations').joinpath('versions', "
-                "'0003_google_identity.py').is_file()"
+                "'0004_email_links.py').is_file()"
             ),
             "auth = EpokAuth(settings=AuthSettings.development(), store=MemoryAuthStore())",
             "try:",
@@ -370,6 +371,22 @@ def _base_check_code() -> str:
             "    assert 'epok-auth[google]' in str(error)",
             "else:",
             "    raise AssertionError('Google enabled without optional dependency')",
+            "class EmailQueue:",
+            "    async def dispatch(self, message: AuthEmail | PendingEmailLink) -> None:",
+            "        del message",
+            "email_settings = AuthSettings.development(",
+            "    email_link_login_url='http://localhost:3000/login',",
+            "    email_link_password_reset_url='http://localhost:3000/reset-password',",
+            "    email_link_invitation_url='http://localhost:3000/invitation',",
+            ")",
+            "email_auth = EpokAuth(",
+            "    settings=email_settings,",
+            "    store=MemoryAuthStore(),",
+            "    email_link_dispatcher=EmailQueue(),",
+            ")",
+            "email_app = FastAPI()",
+            "email_auth.install(email_app, include_email_links=True)",
+            "assert '/auth/email-links/login' in email_app.openapi()['paths']",
         )
     )
 

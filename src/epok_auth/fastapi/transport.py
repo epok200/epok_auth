@@ -63,6 +63,28 @@ class AuthHttpTransport:
             samesite=self.settings.cookie_same_site,
         )
 
+    def set_email_link_cookie(self, response: Response, nonce: str) -> None:
+        response.set_cookie(
+            self.settings.effective_email_link_cookie_name,
+            nonce,
+            max_age=self.settings.email_link_login_ttl_seconds,
+            path=self.settings.cookie_path,
+            domain=self.settings.cookie_domain,
+            secure=self.settings.secure_cookies,
+            httponly=True,
+            samesite="lax",
+        )
+
+    def delete_email_link_cookie(self, response: Response) -> None:
+        response.delete_cookie(
+            self.settings.effective_email_link_cookie_name,
+            path=self.settings.cookie_path,
+            domain=self.settings.cookie_domain,
+            secure=self.settings.secure_cookies,
+            httponly=True,
+            samesite="lax",
+        )
+
     @staticmethod
     def disable_cache(response: Response) -> None:
         response.headers["Cache-Control"] = "no-store"

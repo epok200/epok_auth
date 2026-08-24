@@ -4,9 +4,13 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-> **Status:** `0.3.0` is the current public beta with WebAuthn passkeys, Google Sign-In and
-> isolated Alembic history for host application compatibility. Public APIs may still change
-> before `1.0`.
+Version `0.4.0` also includes browser-bound Magic Links, password recovery, pre-provisioned
+invitations and native SMTP delivery. See
+[`docs/MAGIC_LINKS_ES.md`](docs/MAGIC_LINKS_ES.md).
+
+> **Status:** `0.4.0` is the current beta with WebAuthn passkeys, Google Sign-In, Magic Links and
+> isolated Alembic history for host application compatibility. Public APIs may still change before
+> `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -16,8 +20,8 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 | Gate | Evidence |
 |---|---|
-| Functional and adversarial tests | 321/321 passing, plus passkey and Google browser proofs |
-| Branch coverage | 98.16% |
+| Functional and adversarial tests | 374/374 passing, plus passkey, Google and Magic Link browser proofs |
+| Branch coverage | 98.40% |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |
@@ -27,7 +31,7 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 The repository does not claim that vulnerabilities are impossible. The green gate establishes reproducible evidence for the defined beta threat model and invariants.
 
-## What 0.3.0 includes
+## What 0.4.0 includes
 
 - Argon2id password hashing through `pwdlib`, with rehash support and dummy verification;
 - local users, active/disabled state, roles, scopes, administrative provisioning and reset;
@@ -41,6 +45,7 @@ The repository does not claim that vulnerabilities are impossible. The green gat
 - plug-and-play FastAPI routers and dependencies;
 - WebAuthn passkey registration, discoverable login, listing and revocation;
 - Google Sign-In with linked-only, preauthorized and open account policies;
+- browser-bound Magic Link login, password recovery, pre-provisioned invitations and SMTP delivery;
 - packaged Alembic migrations and an operational CLI;
 - a Nuxt/Nitro BFF reference where Vue never receives access or refresh tokens.
 
@@ -77,6 +82,9 @@ EPOK_AUTH_PASSKEY_RP_ID=example.com
 EPOK_AUTH_PASSKEY_RP_NAME=Colors
 EPOK_AUTH_GOOGLE_CLIENT_ID=123456789-example.apps.googleusercontent.com
 EPOK_AUTH_GOOGLE_ACCOUNT_MODE=linked_only
+EPOK_AUTH_EMAIL_LINK_LOGIN_URL=https://colors.example.com/auth/email-link
+EPOK_AUTH_EMAIL_LINK_PASSWORD_RESET_URL=https://colors.example.com/auth/reset-password
+EPOK_AUTH_EMAIL_LINK_INVITATION_URL=https://colors.example.com/auth/invitation
 ```
 
 Production configuration is **fail-closed**: weak secrets, insecure cookies, generic issuer/audience values, missing PostgreSQL, and ambiguous origins prevent startup.
@@ -126,7 +134,10 @@ from fastapi import Depends, FastAPI
 from epok_auth import AuthSettings, EpokAuth, Principal
 
 settings = AuthSettings()
-auth = EpokAuth.postgres(settings=settings)
+auth = EpokAuth.postgres(
+    settings=settings,
+    email_link_dispatcher=durable_email_queue,
+)
 
 app = FastAPI(lifespan=auth.lifespan)
 auth.install(
@@ -135,6 +146,7 @@ auth.install(
     include_admin=True,
     include_passkeys=True,
     include_google=True,
+    include_email_links=True,
 )
 
 catalog = auth.protected_router(prefix="/api/v1/catalog")
@@ -157,6 +169,9 @@ async def update_catalog(
 app.include_router(catalog)
 ```
 
+`durable_email_queue` is the product-owned implementation of `EmailLinkDispatcher`. The complete
+worker contract is documented in [MAGIC_LINKS_ES.md](docs/MAGIC_LINKS_ES.md).
+
 `auth.install()` exposes:
 
 ```text
@@ -176,6 +191,12 @@ POST /api/v1/auth/google/verify
 POST /api/v1/auth/google/link/options
 POST /api/v1/auth/google/link/verify
 POST /api/v1/auth/users/{user_id}/google/recover
+POST /api/v1/auth/email-links/login
+POST /api/v1/auth/email-links/login/consume
+POST /api/v1/auth/email-links/password-reset
+POST /api/v1/auth/email-links/password-reset/consume
+POST /api/v1/auth/email-links/invitation/consume
+POST /api/v1/auth/users/{user_id}/invitation
 ```
 
 The recovery route and the rest of user administration appear only with `include_admin=True`.
@@ -217,6 +238,7 @@ Vue receives only safe user/session state. Access and refresh credentials remain
 - [Minimal usage and test guide in Spanish](docs/USAGE_ES.md)
 - [Passkeys integration guide in Spanish](docs/PASSKEYS_ES.md)
 - [Google Sign-In integration guide in Spanish](docs/GOOGLE_ES.md)
+- [Magic Links, recovery and email delivery in Spanish](docs/MAGIC_LINKS_ES.md)
 - [Publishing and versioning](docs/PUBLISHING.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Security assurance](docs/SECURITY_ASSURANCE.md)

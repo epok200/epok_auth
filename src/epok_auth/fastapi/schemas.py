@@ -40,6 +40,7 @@ class UpdateUserRequest(StrictSchema):
     roles: list[Capability] | None = Field(default=None, max_length=256)
     scopes: list[Capability] | None = Field(default=None, max_length=2048)
     google_auto_link_allowed: bool | None = None
+    email_link_login_enabled: bool | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -79,6 +80,7 @@ class UserResponse(BaseModel):
     scopes: list[str]
     must_change_password: bool
     password_login_enabled: bool
+    email_link_login_enabled: bool
     google_auto_link_allowed: bool
     failed_login_attempts: int
     locked_until: datetime | None
@@ -97,6 +99,7 @@ class UserResponse(BaseModel):
             scopes=list(user.scopes),
             must_change_password=user.must_change_password,
             password_login_enabled=user.password_login_enabled,
+            email_link_login_enabled=user.email_link_login_enabled,
             google_auto_link_allowed=user.google_auto_link_allowed,
             failed_login_attempts=user.failed_login_attempts,
             locked_until=user.locked_until,

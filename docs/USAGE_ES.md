@@ -1,6 +1,6 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie publicada en `0.3.0`, incluidos passkeys y Google Sign-In. Aquí
+Esta guía documenta la superficie de `0.4.0`, incluidos passkeys, Google Sign-In y Magic Links. Aquí
 encontrarás lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar
 FastAPI y probar cada operación disponible.
 
@@ -12,6 +12,9 @@ de navegador listo para reutilizar.
 
 Para Google Sign-In, políticas de vinculación y recuperación, sigue
 [`GOOGLE_ES.md`](GOOGLE_ES.md).
+
+Para Magic Links, recuperación por correo, invitaciones y SMTP, sigue
+[`MAGIC_LINKS_ES.md`](MAGIC_LINKS_ES.md).
 
 ## 1. Requisitos
 
@@ -362,7 +365,7 @@ print(settings.effective_csrf_cookie_name)
 
 ## 10. Referencia de `EpokAuth`
 
-### `EpokAuth(settings=..., store=..., service=None, passkeys=None, google=None, google_store=None)`
+### `EpokAuth(settings=..., store=..., service=None, passkeys=None, google=None, google_store=None, email_link_service=None, email_link_sender=None, email_link_store=None, email_link_dispatcher=None)`
 
 Construye la integración utilizando un store proporcionado manualmente. Se usa principalmente para adaptadores personalizados o pruebas.
 
@@ -411,14 +414,17 @@ auth = EpokAuth.postgres(
     pool_size=5,
     max_overflow=10,
     pool_timeout=5.0,
+    email_link_dispatcher=production_queue,
 )
 ```
 
-`settings.database_url` es obligatorio.
+`settings.database_url` es obligatorio. El sender y el dispatcher son opcionales salvo cuando se
+habilitan enlaces de correo; producción requiere el dispatcher durable.
 
 ### `auth.install(app, ...)`
 
-Instala las rutas de autenticación, opcionalmente las rutas administrativas, passkeys, Google Sign-In y los manejadores de errores.
+Instala las rutas de autenticación, opcionalmente las rutas administrativas, passkeys, Google
+Sign-In, Magic Links y los manejadores de errores.
 
 ```python
 auth.install(
@@ -427,6 +433,7 @@ auth.install(
     include_admin=True,
     include_passkeys=True,
     include_google=True,
+    include_email_links=True,
     admin_prefix="/users",
 )
 ```
@@ -434,6 +441,10 @@ auth.install(
 Para la primera prueba esta es la función recomendada.
 `include_passkeys=True` requiere el extra `passkeys` y `EPOK_AUTH_PASSKEY_RP_ID`.
 `include_google=True` requiere el extra `google` y `EPOK_AUTH_GOOGLE_CLIENT_ID`.
+`include_email_links=True` requiere los tres destinos frontend. En desarrollo y pruebas acepta un
+`email_link_sender` inyectado o las variables `EPOK_AUTH_SMTP_*`. En producción exige un
+`email_link_dispatcher` durable; el proceso web no necesita credenciales SMTP cuando el worker se
+encarga de la entrega. Consulta [MAGIC_LINKS_ES.md](MAGIC_LINKS_ES.md) para el contrato de cola.
 Cada prefijo se instala una sola vez. Varias instancias pueden compartir la misma aplicación siempre
 que utilicen prefijos distintos. El lifespan de cualquiera de ellas cierra los recursos creados por
 todas las instancias instaladas en esa app. Una instancia que crea o puede crear recursos internos,

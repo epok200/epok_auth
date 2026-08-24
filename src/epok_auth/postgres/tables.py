@@ -33,7 +33,9 @@ user_account = Table(
     Column("scopes", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("must_change_password", Boolean, nullable=False, server_default=text("false")),
     Column("password_login_enabled", Boolean, nullable=False, server_default=text("true")),
+    Column("email_link_login_enabled", Boolean, nullable=False, server_default=text("false")),
     Column("google_auto_link_allowed", Boolean, nullable=False, server_default=text("false")),
+    Column("security_version", Integer, nullable=False, server_default="0"),
     Column("failed_login_attempts", Integer, nullable=False, server_default="0"),
     Column("locked_until", DateTime(timezone=True)),
     Column("password_changed_at", DateTime(timezone=True)),
@@ -55,6 +57,7 @@ user_account = Table(
         "failed_login_attempts >= 0",
         name="ck_epok_auth_user_failed_attempts",
     ),
+    CheckConstraint("security_version >= 0", name="ck_epok_auth_user_security_version"),
     Index("ix_epok_auth_user_status", "status"),
     Index("ix_epok_auth_user_roles_gin", "roles", postgresql_using="gin"),
 )
@@ -289,4 +292,79 @@ google_challenge = Table(
         name="ck_epok_auth_google_challenge_user",
     ),
     Index("ix_epok_auth_google_challenge_expiry", "expires_at"),
+)
+
+email_link = Table(
+    "email_link",
+    metadata,
+    Column("id", Uuid(as_uuid=True), primary_key=True),
+    Column(
+        "user_id",
+        Uuid(as_uuid=True),
+        ForeignKey("user_account.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("purpose", Text, nullable=False),
+    Column("generation", Integer, nullable=False),
+    Column("token_hash", Text, nullable=False),
+    Column("recipient_hash", Text, nullable=False),
+    Column("browser_hash", Text),
+    Column("security_version", Integer, nullable=False),
+    Column("state", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("delivered_at", DateTime(timezone=True)),
+    Column("consumed_at", DateTime(timezone=True)),
+    Column("revoked_at", DateTime(timezone=True)),
+    UniqueConstraint("token_hash", name="uq_epok_auth_email_link_token_hash"),
+    UniqueConstraint(
+        "user_id",
+        "purpose",
+        "generation",
+        name="uq_epok_auth_email_link_generation",
+    ),
+    CheckConstraint(
+        "purpose IN ('login', 'password_reset', 'invitation')",
+        name="ck_epok_auth_email_link_purpose",
+    ),
+    CheckConstraint(
+        "state IN ('pending', 'active', 'failed', 'consumed', 'revoked')",
+        name="ck_epok_auth_email_link_state",
+    ),
+    CheckConstraint(
+        "length(token_hash) = 64 AND length(recipient_hash) = 64 "
+        "AND (browser_hash IS NULL OR length(browser_hash) = 64)",
+        name="ck_epok_auth_email_link_hashes",
+    ),
+    CheckConstraint(
+        "(purpose = 'login' AND browser_hash IS NOT NULL) "
+        "OR (purpose <> 'login' AND browser_hash IS NULL)",
+        name="ck_epok_auth_email_link_browser",
+    ),
+    CheckConstraint(
+        "generation > 0 AND security_version >= 0",
+        name="ck_epok_auth_email_link_versions",
+    ),
+    CheckConstraint(
+        "created_at < expires_at "
+        "AND (delivered_at IS NULL OR delivered_at >= created_at) "
+        "AND (consumed_at IS NULL OR consumed_at >= created_at) "
+        "AND (revoked_at IS NULL OR revoked_at >= created_at)",
+        name="ck_epok_auth_email_link_times",
+    ),
+    CheckConstraint(
+        "(state = 'pending' AND delivered_at IS NULL AND consumed_at IS NULL "
+        "AND revoked_at IS NULL) OR "
+        "(state = 'active' AND delivered_at IS NOT NULL AND consumed_at IS NULL "
+        "AND revoked_at IS NULL) OR "
+        "(state = 'failed' AND delivered_at IS NULL AND consumed_at IS NULL "
+        "AND revoked_at IS NOT NULL) OR "
+        "(state = 'consumed' AND delivered_at IS NOT NULL AND consumed_at IS NOT NULL "
+        "AND revoked_at IS NULL) OR "
+        "(state = 'revoked' AND consumed_at IS NULL AND revoked_at IS NOT NULL)",
+        name="ck_epok_auth_email_link_state_times",
+    ),
+    Index("ix_epok_auth_email_link_user_purpose", "user_id", "purpose", "generation"),
+    Index("ix_epok_auth_email_link_state_expiry", "state", "expires_at"),
+    Index("ix_epok_auth_email_link_created", "created_at"),
 )

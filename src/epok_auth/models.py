@@ -44,6 +44,14 @@ class SecurityEventType(StrEnum):
     GOOGLE_LOGIN_SUCCEEDED = "google.login_succeeded"
     GOOGLE_LOGIN_FAILED = "google.login_failed"
     GOOGLE_RECOVERY_COMPLETED = "google.recovery_completed"
+    EMAIL_LINK_ISSUED = "email_link.issued"
+    EMAIL_LINK_DELIVERED = "email_link.delivered"
+    EMAIL_LINK_DELIVERY_FAILED = "email_link.delivery_failed"
+    EMAIL_NOTICE_DELIVERY_FAILED = "email_notice.delivery_failed"
+    EMAIL_LINK_LOGIN_SUCCEEDED = "email_link.login_succeeded"
+    EMAIL_LINK_LOGIN_FAILED = "email_link.login_failed"
+    PASSWORD_RECOVERY_COMPLETED = "password.recovery_completed"
+    INVITATION_ACTIVATED = "invitation.activated"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +65,9 @@ class UserAccount:
     scopes: tuple[str, ...] = ()
     must_change_password: bool = False
     password_login_enabled: bool = True
+    email_link_login_enabled: bool = False
     google_auto_link_allowed: bool = False
+    security_version: int = 0
     failed_login_attempts: int = 0
     locked_until: datetime | None = None
     password_changed_at: datetime | None = None
@@ -180,6 +190,7 @@ class UserUpdate:
     status: UserStatus | None = None
     roles: tuple[str, ...] | None = None
     scopes: tuple[str, ...] | None = None
+    email_link_login_enabled: bool | None = None
     google_auto_link_allowed: bool | None = None
 
 

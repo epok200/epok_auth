@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
+from epok_auth.email_links.models import EmailLink, EmailLinkPurpose, EmailLinkState
 from epok_auth.google.models import (
     ExternalIdentity,
     GoogleChallenge,
@@ -31,6 +32,7 @@ class MemoryAuthStore:
         self.passkey_challenges: dict[UUID, PasskeyChallenge] = {}
         self.external_identities: dict[UUID, ExternalIdentity] = {}
         self.google_challenges: dict[UUID, GoogleChallenge] = {}
+        self.email_links: dict[UUID, EmailLink] = {}
         self.events: list[SecurityEvent] = []
         self._lock = asyncio.Lock()
 
@@ -45,6 +47,7 @@ class MemoryAuthStore:
                     self.passkey_challenges,
                     self.external_identities,
                     self.google_challenges,
+                    self.email_links,
                     self.events,
                 )
             )
@@ -58,6 +61,7 @@ class MemoryAuthStore:
                     self.passkey_challenges,
                     self.external_identities,
                     self.google_challenges,
+                    self.email_links,
                     self.events,
                 ) = snapshot
                 raise
@@ -174,6 +178,166 @@ class _MemoryTransaction:
 
     async def add_security_event(self, event: SecurityEvent) -> None:
         self.store.events.append(event)
+
+    async def delete_old_email_links(self, before: datetime) -> int:
+        old_ids = [
+            link_id for link_id, link in self.store.email_links.items() if link.created_at < before
+        ]
+        for link_id in old_ids:
+            del self.store.email_links[link_id]
+        return len(old_ids)
+
+    async def count_email_link_requests(
+        self,
+        user_id: UUID,
+        purpose: EmailLinkPurpose,
+        since: datetime,
+    ) -> int:
+        return sum(
+            link.user_id == user_id and link.purpose is purpose and link.created_at >= since
+            for link in self.store.email_links.values()
+        )
+
+    async def get_latest_email_link(
+        self,
+        user_id: UUID,
+        purpose: EmailLinkPurpose,
+    ) -> EmailLink | None:
+        links = (
+            link
+            for link in self.store.email_links.values()
+            if link.user_id == user_id and link.purpose is purpose
+        )
+        return max(links, key=lambda link: link.generation, default=None)
+
+    async def get_email_link(
+        self,
+        link_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> EmailLink | None:
+        del for_update
+        return self.store.email_links.get(link_id)
+
+    async def get_email_link_by_token_hash(
+        self,
+        token_hash: str,
+        purpose: EmailLinkPurpose,
+    ) -> EmailLink | None:
+        return next(
+            (
+                link
+                for link in self.store.email_links.values()
+                if link.token_hash == token_hash and link.purpose is purpose
+            ),
+            None,
+        )
+
+    async def insert_email_link(self, link: EmailLink) -> None:
+        duplicate = link.id in self.store.email_links or any(
+            existing.token_hash == link.token_hash
+            or (
+                existing.user_id == link.user_id
+                and existing.purpose is link.purpose
+                and existing.generation == link.generation
+            )
+            for existing in self.store.email_links.values()
+        )
+        if duplicate:
+            raise StoreConflictError("email link already exists")
+        self.store.email_links[link.id] = link
+
+    async def activate_email_link(
+        self,
+        link_id: UUID,
+        now: datetime,
+    ) -> EmailLink | None:
+        link = self.store.email_links.get(link_id)
+        if link is None or link.state is not EmailLinkState.PENDING:
+            return None
+        activated = replace(link, state=EmailLinkState.ACTIVE, delivered_at=now)
+        self.store.email_links[link_id] = activated
+        return activated
+
+    async def fail_email_link(
+        self,
+        link_id: UUID,
+        now: datetime,
+    ) -> EmailLink | None:
+        return self._close_email_link(
+            link_id,
+            now,
+            EmailLinkState.FAILED,
+            allowed_states=(EmailLinkState.PENDING,),
+        )
+
+    async def revoke_email_link(
+        self,
+        link_id: UUID,
+        now: datetime,
+    ) -> EmailLink | None:
+        return self._close_email_link(
+            link_id,
+            now,
+            EmailLinkState.REVOKED,
+            allowed_states=(EmailLinkState.PENDING, EmailLinkState.ACTIVE),
+        )
+
+    async def revoke_other_active_email_links(
+        self,
+        user_id: UUID,
+        purpose: EmailLinkPurpose,
+        active_link_id: UUID,
+        now: datetime,
+    ) -> int:
+        count = 0
+        for link_id, link in tuple(self.store.email_links.items()):
+            if (
+                link.user_id == user_id
+                and link.purpose is purpose
+                and link.id != active_link_id
+                and link.state is EmailLinkState.ACTIVE
+            ):
+                self.store.email_links[link_id] = replace(
+                    link,
+                    state=EmailLinkState.REVOKED,
+                    revoked_at=now,
+                )
+                count += 1
+        return count
+
+    async def consume_email_link(
+        self,
+        link_id: UUID,
+        purpose: EmailLinkPurpose,
+        now: datetime,
+    ) -> EmailLink | None:
+        link = self.store.email_links.get(link_id)
+        if (
+            link is None
+            or link.purpose is not purpose
+            or link.state is not EmailLinkState.ACTIVE
+            or link.expires_at <= now
+        ):
+            return None
+        consumed = replace(link, state=EmailLinkState.CONSUMED, consumed_at=now)
+        self.store.email_links[link_id] = consumed
+        return consumed
+
+    def _close_email_link(
+        self,
+        link_id: UUID,
+        now: datetime,
+        state: EmailLinkState,
+        *,
+        allowed_states: tuple[EmailLinkState, ...],
+    ) -> EmailLink | None:
+        link = self.store.email_links.get(link_id)
+        if link is None or link.state not in allowed_states:
+            return None
+        closed = replace(link, state=state, revoked_at=now)
+        self.store.email_links[link_id] = closed
+        return closed
 
     async def delete_expired_passkey_challenges(self, now: datetime) -> int:
         expired = [

@@ -157,6 +157,7 @@ class GoogleLoginService:
                 google_auto_link_allowed=False,
                 failed_login_attempts=0,
                 locked_until=None,
+                security_version=user.security_version + 1,
                 password_changed_at=now,
                 updated_at=now,
             )
@@ -347,6 +348,7 @@ class GoogleLoginService:
             google_auto_link_allowed=False,
             failed_login_attempts=0,
             locked_until=None,
+            security_version=user.security_version + 1,
             password_changed_at=now,
             updated_at=now,
         )
@@ -424,6 +426,7 @@ class GoogleLoginService:
     ) -> ExternalIdentity:
         failure = None
         identity = None
+        identity_inserted = False
         async with self.store.transaction() as transaction:
             user = await transaction.get_user_by_id(principal.user_id, for_update=True)
             session = await transaction.get_session_by_id(principal.session_id, for_update=True)
@@ -445,6 +448,7 @@ class GoogleLoginService:
                 else:
                     identity = self._identity(principal.user_id, claims, now)
                     await transaction.insert_external_identity(identity)
+                    identity_inserted = True
                     await self._event(
                         transaction,
                         SecurityEventType.GOOGLE_IDENTITY_LINKED,
@@ -452,11 +456,15 @@ class GoogleLoginService:
                         context,
                         user_id=principal.user_id,
                     )
-            if identity is not None and user is not None and user.google_auto_link_allowed:
+            security_changed = identity_inserted or bool(
+                identity is not None and user is not None and user.google_auto_link_allowed
+            )
+            if security_changed and user is not None:
                 await transaction.update_user(
                     replace(
                         user,
                         google_auto_link_allowed=False,
+                        security_version=user.security_version + 1,
                         updated_at=now,
                     )
                 )

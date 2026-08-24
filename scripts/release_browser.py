@@ -56,3 +56,22 @@ def run_browser_proofs(pipeline: Pipeline, context: ReleaseContext) -> None:
         "Browser Google Sign-In proof",
         [tools.node, "--test", "examples/google/browser.e2e.test.mjs"],
     )
+    pipeline.run(
+        "Install Magic Link browser proof dependencies",
+        [tools.npm, "ci", "--prefix", "examples/email_links"],
+    )
+    pipeline.run(
+        "Audit Magic Link browser proof dependencies",
+        [
+            tools.npm,
+            "audit",
+            "--prefix",
+            "examples/email_links",
+            "--audit-level",
+            "high",
+        ],
+    )
+    pipeline.run(
+        "Browser Magic Link proof",
+        [tools.node, "--test", "examples/email_links/browser.e2e.test.mjs"],
+    )

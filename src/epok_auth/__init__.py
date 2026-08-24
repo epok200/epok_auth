@@ -1,6 +1,18 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from epok_auth.config import AuthSettings, Environment
+from epok_auth.email_links import (
+    AuthEmail,
+    AuthEmailKind,
+    EmailLinkDispatcher,
+    EmailLinkMailer,
+    EmailLinkSender,
+    EmailLinkService,
+    PendingEmailLink,
+    SmtpEmailSender,
+    SmtpSecurity,
+    SmtpSettings,
+)
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.fastapi import EpokAuth
 from epok_auth.google import GoogleAccountMode, GoogleLoginService
@@ -13,9 +25,15 @@ except PackageNotFoundError:  # pragma: no cover - direct source checkout withou
     __version__ = "0.0.0+unknown"
 
 __all__ = [
+    "AuthEmail",
+    "AuthEmailKind",
     "AuthError",
     "AuthErrorCode",
     "AuthSettings",
+    "EmailLinkDispatcher",
+    "EmailLinkMailer",
+    "EmailLinkSender",
+    "EmailLinkService",
     "Environment",
     "EpokAuth",
     "GoogleAccountMode",
@@ -23,7 +41,11 @@ __all__ = [
     "PasskeyCredential",
     "PasskeyOptions",
     "PasskeyService",
+    "PendingEmailLink",
     "Principal",
+    "SmtpEmailSender",
+    "SmtpSecurity",
+    "SmtpSettings",
     "UserAccount",
     "UserStatus",
     "__version__",

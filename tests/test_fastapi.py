@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import SecretStr
 
 from epok_auth import AuthSettings, EpokAuth
+from epok_auth.email_links import AuthEmail, PendingEmailLink
 from epok_auth.models import Principal
 from epok_auth.testing import MemoryAuthStore
 from tests.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, NEW_PASSWORD
@@ -23,6 +24,16 @@ class ClosingMemoryStore(MemoryAuthStore):
         self.close_calls += 1
         if self.close_error is not None:
             raise self.close_error
+
+
+class NullEmailSender:
+    async def send(self, email: AuthEmail) -> None:
+        del email
+
+
+class NullEmailDispatcher:
+    async def dispatch(self, message: AuthEmail | PendingEmailLink) -> None:
+        del message
 
 
 async def client_for(
@@ -77,6 +88,8 @@ async def test_postgres_factory_forwards_pool_configuration(
     received: dict[str, object] = {}
 
     store = ClosingMemoryStore()
+    sender = NullEmailSender()
+    dispatcher = NullEmailDispatcher()
 
     class StoreFactory:
         @classmethod
@@ -93,10 +106,14 @@ async def test_postgres_factory_forwards_pool_configuration(
         pool_size=7,
         max_overflow=11,
         pool_timeout=3.5,
+        email_link_sender=sender,
+        email_link_dispatcher=dispatcher,
     )
 
     assert auth.store is store
     assert auth.google_store is store
+    assert auth.email_link_sender is sender
+    assert auth.email_link_dispatcher is dispatcher
     assert received == {
         "url": "postgresql://user:pass@db/tests",
         "pool_size": 7,

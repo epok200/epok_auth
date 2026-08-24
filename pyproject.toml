@@ -1,13 +1,13 @@
 [project]
 name = "epok-auth"
-version = "0.3.0"
-description = "FastAPI authentication with revocable sessions, passkeys and Google Sign-In."
+version = "0.4.0"
+description = "FastAPI authentication with revocable sessions, passkeys, Google and Magic Links."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "EPOK" }]
-keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql", "passkeys", "webauthn", "google"]
+keywords = ["fastapi", "authentication", "security", "jwt", "sessions", "postgresql", "passkeys", "webauthn", "google", "magic-links"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Framework :: FastAPI",
@@ -139,6 +139,7 @@ ignore = ["PLR0913", "PLR2004", "S101"]
 "src/epok_auth/config.py" = ["PLR0912"]
 "src/epok_auth/errores/catalogo.py" = ["S105"]
 "src/epok_auth/errores/excepcion.py" = ["PLC0415"]
+"src/epok_auth/email_links/models.py" = ["S105"]
 "src/epok_auth/fastapi/integration.py" = ["FAST001", "PLC0415", "PLR0917"]
 "src/epok_auth/fastapi/schemas.py" = ["S105"]
 "src/epok_auth/models.py" = ["S105"]
