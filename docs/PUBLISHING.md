@@ -148,7 +148,10 @@ Ruff format
 Ruff lint y reglas de seguridad
 Pyright estricto
 compileall
-prueba Node del cliente WebAuthn de navegador
+npm ci y npm audit del cliente WebAuthn
+pruebas unitarias y Chromium end-to-end del cliente WebAuthn
+npm ci y npm audit del cliente Google Sign-In
+prueba Chromium end-to-end de Google Sign-In
 pip-audit
 suite no integrada en Python 3.12
 suite no integrada en Python 3.13
@@ -164,7 +167,7 @@ contenido limitado al paquete público y su metadata
 instalación aislada del wheel
 instalación aislada del sdist
 instalación base sin WebAuthn y error opcional accionable
-instalación aislada del extra passkeys para wheel y sdist
+instalación aislada de los extras google, postgres y passkeys para wheel y sdist
 versión runtime igual a la metadata
 smoke test del CLI
 uv publish --dry-run
@@ -207,7 +210,7 @@ VERSION="$(uv version --short)"
 uv run \
   --no-project \
   --refresh-package epok-auth \
-  --with "epok-auth[postgres,passkeys]==$VERSION" \
+  --with "epok-auth[google,postgres,passkeys]==$VERSION" \
   -- python -c 'import epok_auth; print(epok_auth.__version__)'
 ```
 
