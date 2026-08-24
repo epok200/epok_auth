@@ -71,7 +71,7 @@
 | Lost Google access | Administrative recovery removes the identity, restores a temporary password and revokes sessions atomically |
 | Recovery races | Link revalidates its persisted session inside the write transaction; recovery, link and refresh use a tested lock order |
 
-## Explicit non-goals in the current candidate
+## Explicit non-goals in 0.3.0
 
 - attestation trust decisions about authenticator manufacturers;
 - passkeys as an automatic MFA or step-up policy;

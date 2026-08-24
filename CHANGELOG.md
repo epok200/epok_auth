@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-08-24
 
 - add optional Google Sign-In through the official `google-auth` verifier;
 - add linked-only, preauthorized and open account policies with safe defaults;

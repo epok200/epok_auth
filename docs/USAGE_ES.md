@@ -1,9 +1,8 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie actual del repositorio. `0.2.1` es la versión publicada con
-passkeys; Google Sign-In pertenece al candidato `0.3` todavía no publicado. Aquí encontrarás lo
-mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar
-cada operación disponible.
+Esta guía documenta la superficie publicada en `0.3.0`, incluidos passkeys y Google Sign-In. Aquí
+encontrarás lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar
+FastAPI y probar cada operación disponible.
 
 La ruta recomendada para la primera prueba es usar `AuthSettings`, `EpokAuth.postgres()` y `auth.install()`. Los helpers internos y las clases de persistencia no son necesarios para validar la beta.
 
