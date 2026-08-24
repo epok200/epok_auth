@@ -17,7 +17,7 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 | Gate | Evidence |
 |---|---|
 | Functional and adversarial tests | 321/321 passing, plus passkey and Google browser proofs |
-| Branch coverage | 98.23% |
+| Branch coverage | 98.16% |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |

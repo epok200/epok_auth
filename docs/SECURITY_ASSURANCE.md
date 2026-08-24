@@ -9,7 +9,7 @@ following completed successfully on a clean GitHub runner:
 
 - 321 tests pass with disposable PostgreSQL, including migration and concurrency cases;
 - the passkey and Google browser reference clients pass their real Chromium flows;
-- branch-aware coverage reaches 98.23%;
+- branch-aware coverage reaches 98.16%;
 - 299 non-integration tests pass on Python 3.12, 3.13 and 3.14;
 - PostgreSQL 17 migrates from an empty database and Alembic reports no metadata drift;
 - Ruff formatting, lint and security rules pass;
