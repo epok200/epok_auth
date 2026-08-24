@@ -1,9 +1,8 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie actual del repositorio. `0.2.1` es la versión publicada con
-passkeys; Google Sign-In pertenece al candidato `0.3` todavía no publicado. Aquí encontrarás lo
-mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar FastAPI y probar
-cada operación disponible.
+Esta guía documenta la superficie publicada en `0.3.0`, incluidos passkeys y Google Sign-In. Aquí
+encontrarás lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar
+FastAPI y probar cada operación disponible.
 
 La ruta recomendada para la primera prueba es usar `AuthSettings`, `EpokAuth.postgres()` y `auth.install()`. Los helpers internos y las clases de persistencia no son necesarios para validar la beta.
 
@@ -363,7 +362,7 @@ print(settings.effective_csrf_cookie_name)
 
 ## 10. Referencia de `EpokAuth`
 
-### `EpokAuth(settings=..., store=..., service=None, passkeys=None, google=None)`
+### `EpokAuth(settings=..., store=..., service=None, passkeys=None, google=None, google_store=None)`
 
 Construye la integración utilizando un store proporcionado manualmente. Se usa principalmente para adaptadores personalizados o pruebas.
 
@@ -380,6 +379,11 @@ auth = EpokAuth(
 
 Para la prueba end-to-end usa preferentemente `EpokAuth.postgres()`.
 
+Los adaptadores personalizados que habiliten Google deben declarar `google_store` explícitamente o
+inyectar un `GoogleLoginService` completo. Esto permite comprobar que el contrato fue proporcionado
+durante `install()` en lugar de fallar durante el primer request. `EpokAuth.postgres()` conecta ese
+contrato automáticamente.
+
 ### `EpokAuth.postgres(...)`
 
 Crea el store PostgreSQL oficial y devuelve la integración lista para instalar.
@@ -388,6 +392,16 @@ Crea el store PostgreSQL oficial y devuelve la integración lista para instalar.
 settings = AuthSettings()
 auth = EpokAuth.postgres(settings=settings)
 ```
+
+Conecta el lifecycle a FastAPI para cerrar automáticamente el pool y cualquier cliente externo
+creado por la facade:
+
+```python
+app = FastAPI(lifespan=auth.lifespan)
+```
+
+También puedes ejecutar `await auth.aclose()` durante un cierre administrado. La facade solo cierra
+los recursos que creó; los stores y servicios inyectados siguen siendo responsabilidad del producto.
 
 Parámetros opcionales:
 
@@ -420,6 +434,11 @@ auth.install(
 Para la primera prueba esta es la función recomendada.
 `include_passkeys=True` requiere el extra `passkeys` y `EPOK_AUTH_PASSKEY_RP_ID`.
 `include_google=True` requiere el extra `google` y `EPOK_AUTH_GOOGLE_CLIENT_ID`.
+Cada prefijo se instala una sola vez. Varias instancias pueden compartir la misma aplicación siempre
+que utilicen prefijos distintos. El lifespan de cualquiera de ellas cierra los recursos creados por
+todas las instancias instaladas en esa app. Una instancia que crea o puede crear recursos internos,
+como un pool PostgreSQL o el verificador Google lazy, no se puede compartir entre apps. Las
+instalaciones duplicadas o ambiguas fallan durante el arranque.
 
 ### `auth.router(prefix=...)`
 

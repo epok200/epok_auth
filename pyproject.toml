@@ -1,6 +1,6 @@
 [project]
 name = "epok-auth"
-version = "0.2.1"
+version = "0.3.0"
 description = "FastAPI authentication with revocable sessions, passkeys and Google Sign-In."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -131,6 +131,7 @@ ignore = ["PLR0913", "PLR2004", "S101"]
 "tests/test_errors.py" = ["S301", "S403"]
 "tests/test_postgres_integration.py" = ["E402"]
 "tests/test_google_postgres_integration.py" = ["E402"]
+"tests/test_migration_isolation_integration.py" = ["E402"]
 "tests/test_tokens.py" = ["DTZ001"]
 "scripts/publish.py" = ["PLR0912", "PLR0915", "S105", "S404"]
 "scripts/release_support.py" = ["S105"]

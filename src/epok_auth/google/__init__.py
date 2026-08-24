@@ -6,6 +6,7 @@ from epok_auth.google.models import (
     GoogleOptions,
 )
 from epok_auth.google.service import GoogleLoginService
+from epok_auth.google.store import GoogleStore, GoogleTransaction
 
 __all__ = [
     "GOOGLE_ISSUER",
@@ -14,4 +15,6 @@ __all__ = [
     "GoogleClaims",
     "GoogleLoginService",
     "GoogleOptions",
+    "GoogleStore",
+    "GoogleTransaction",
 ]

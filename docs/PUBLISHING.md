@@ -34,7 +34,7 @@ La versión se declara una sola vez en `pyproject.toml`:
 
 ```toml
 [project]
-version = "0.2.1"
+version = "<versión actual>"
 ```
 
 `epok_auth.__version__` se obtiene mediante `importlib.metadata`, así que no existe una segunda constante que mantener.
@@ -148,7 +148,10 @@ Ruff format
 Ruff lint y reglas de seguridad
 Pyright estricto
 compileall
-prueba Node del cliente WebAuthn de navegador
+npm ci y npm audit del cliente WebAuthn
+pruebas unitarias y Chromium end-to-end del cliente WebAuthn
+npm ci y npm audit del cliente Google Sign-In
+prueba Chromium end-to-end de Google Sign-In
 pip-audit
 suite no integrada en Python 3.12
 suite no integrada en Python 3.13
@@ -164,7 +167,7 @@ contenido limitado al paquete público y su metadata
 instalación aislada del wheel
 instalación aislada del sdist
 instalación base sin WebAuthn y error opcional accionable
-instalación aislada del extra passkeys para wheel y sdist
+instalación aislada de los extras google, postgres y passkeys para wheel y sdist
 versión runtime igual a la metadata
 smoke test del CLI
 uv publish --dry-run
@@ -182,9 +185,9 @@ El contenedor PostgreSQL se elimina en un bloque de limpieza aunque una prueba f
 
 ## Serie publicada
 
-`0.2.0` introdujo passkeys y tiene el tag `v0.2.0`. `0.2.1` es el patch de metadata
-correspondiente, sin cambios funcionales. Cada release se valida desde un `main` limpio
-y con CI verde mediante:
+La serie `0.2` introdujo passkeys. La serie `0.3` incorpora Google Sign-In con políticas de
+cuenta y aislamiento del historial Alembic. Cada release se valida desde un `main` limpio y con
+CI verde mediante:
 
 ```bash
 uv run scripts/publish.py --validate-only
@@ -207,7 +210,7 @@ VERSION="$(uv version --short)"
 uv run \
   --no-project \
   --refresh-package epok-auth \
-  --with "epok-auth[postgres,passkeys]==$VERSION" \
+  --with "epok-auth[google,postgres,passkeys]==$VERSION" \
   -- python -c 'import epok_auth; print(epok_auth.__version__)'
 ```
 

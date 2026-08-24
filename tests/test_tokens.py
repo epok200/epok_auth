@@ -75,6 +75,8 @@ def test_issue_and_verify_strict_access_token() -> None:
         lambda payload: payload.update(exp=payload["iat"] + 9999),
         lambda payload: payload.update(auth_time=payload["iat"] + 100),
         lambda payload: payload.update(nbf=payload["iat"] + 100),
+        lambda payload: payload.update(nbf=payload["iat"] - 100),
+        lambda payload: payload.update(iat=payload["iat"] + 0.5),
     ],
 )
 def test_rejects_malformed_or_policy_violating_claims(mutate: object) -> None:

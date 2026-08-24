@@ -246,3 +246,78 @@ def test_google_install_fails_at_startup_when_client_id_is_missing(settings: Aut
 
     with pytest.raises(ValueError, match="google_client_id"):
         facade.install(FastAPI(), include_google=True)
+
+
+def test_lazy_google_install_requires_explicit_store_contract(
+    settings: AuthSettings,
+    store: MemoryAuthStore,
+    clock: MutableClock,
+) -> None:
+    harness = create_harness(settings, store, clock)
+    facade = EpokAuth(
+        settings=harness.settings,
+        store=store,
+        service=harness.auth,
+    )
+
+    with pytest.raises(ValueError, match="google_store"):
+        facade.install(FastAPI(), include_google=True)
+
+
+def test_lazy_google_resource_owner_cannot_be_shared_between_apps(
+    settings: AuthSettings,
+    store: MemoryAuthStore,
+    clock: MutableClock,
+) -> None:
+    harness = create_harness(settings, store, clock)
+    facade = EpokAuth(
+        settings=harness.settings,
+        store=store,
+        service=harness.auth,
+        google_store=store,
+    )
+    facade.install(FastAPI(), prefix="/first")
+
+    with pytest.raises(ValueError, match="resource owner"):
+        facade.install(FastAPI(), prefix="/second")
+
+
+@pytest.mark.asyncio
+async def test_lazy_google_install_without_admin_closes_owned_verifier(
+    settings: AuthSettings,
+    clock: MutableClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = MemoryAuthStore()
+    harness = create_harness(settings, store, clock)
+    state = {"close_calls": 0}
+
+    class Verifier:
+        def __init__(self, **options: object) -> None:
+            assert options
+
+        def verify(self, credential: str, *, audience: str, nonce: str):
+            raise AssertionError((credential, audience, nonce))
+
+        def close(self) -> None:
+            state["close_calls"] += 1
+
+    import epok_auth.google.google_auth
+
+    monkeypatch.setattr(epok_auth.google.google_auth, "GoogleAuthVerifier", Verifier)
+    facade = EpokAuth(
+        settings=harness.settings,
+        store=store,
+        service=harness.auth,
+        google_store=store,
+    )
+    app = FastAPI()
+
+    facade.install(app, include_google=True, include_admin=False)
+    paths = set(app.openapi()["paths"])
+    await facade.aclose()
+    await facade.aclose()
+
+    assert "/auth/google/options" in paths
+    assert "/auth/users/{user_id}/google/recover" not in paths
+    assert state["close_calls"] == 1

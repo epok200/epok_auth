@@ -1,9 +1,9 @@
 import asyncio
 import secrets
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from epok_auth.config import AuthSettings
 
@@ -53,9 +53,7 @@ def upgrade_db(
     from epok_auth.migrate import upgrade_database
 
     settings = _settings_with_database()
-    database_url = settings.database_url
-    if database_url is None:  # guarded by _settings_with_database
-        raise typer.Exit(code=1)
+    database_url = cast(SecretStr, settings.database_url)
     upgrade_database(database_url.get_secret_value(), revision=revision)
     typer.echo(f"epok-auth database upgraded to {revision}.")
 
@@ -66,9 +64,7 @@ def check_db() -> None:
     from epok_auth.migrate import check_database
 
     settings = _settings_with_database()
-    database_url = settings.database_url
-    if database_url is None:  # guarded by _settings_with_database
-        raise typer.Exit(code=1)
+    database_url = cast(SecretStr, settings.database_url)
     check_database(database_url.get_secret_value())
     typer.echo("epok-auth database schema matches the packaged metadata.")
 
@@ -103,9 +99,7 @@ async def _create_admin(
     from epok_auth.postgres import PostgresAuthStore
     from epok_auth.service import AuthService
 
-    database_url = settings.database_url
-    if database_url is None:  # guarded by _settings_with_database; keeps typing explicit.
-        raise RuntimeError("database_url is required")
+    database_url = cast(SecretStr, settings.database_url)
     store = PostgresAuthStore.from_url(database_url.get_secret_value())
     try:
         await AuthService(store=store, settings=settings).create_admin(

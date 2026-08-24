@@ -148,7 +148,7 @@ from epok_auth import AuthSettings, EpokAuth
 settings = AuthSettings()
 auth = EpokAuth.postgres(settings=settings)
 
-app = FastAPI()
+app = FastAPI(lifespan=auth.lifespan)
 auth.install(
     app,
     prefix="/api/v1/auth",

@@ -10,6 +10,7 @@ from epok_auth.service import (
     normalize_capabilities,
     normalize_display_name,
     normalize_email,
+    normalize_email_for_login,
 )
 from epok_auth.testing import MemoryAuthStore
 from tests.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, USER_EMAIL
@@ -41,6 +42,20 @@ async def test_create_initial_admin_once(
             password=ADMIN_PASSWORD,
         )
     assert captured.value.code is AuthErrorCode.ADMIN_EXISTS
+
+
+@pytest.mark.asyncio
+async def test_create_admin_translates_email_conflict(service: AuthService) -> None:
+    await service.create_user(email=ADMIN_EMAIL, display_name="Existing User")
+
+    with pytest.raises(AuthError) as captured:
+        await service.create_admin(
+            email=ADMIN_EMAIL,
+            display_name="Admin",
+            password=ADMIN_PASSWORD,
+        )
+
+    assert captured.value.code is AuthErrorCode.USER_EXISTS
 
 
 @pytest.mark.asyncio
@@ -116,6 +131,14 @@ async def test_list_get_and_update_users(service: AuthService) -> None:
     assert missing.value.code is AuthErrorCode.USER_NOT_FOUND
     with pytest.raises(AuthError):
         await service.update_user(uuid4(), UserUpdate(display_name="Missing"))
+
+
+@pytest.mark.asyncio
+async def test_reset_password_rejects_unknown_user(service: AuthService) -> None:
+    with pytest.raises(AuthError) as captured:
+        await service.reset_password(uuid4())
+
+    assert captured.value.code is AuthErrorCode.USER_NOT_FOUND
 
 
 @pytest.mark.asyncio
@@ -233,3 +256,11 @@ def test_identity_and_capability_normalizers() -> None:
         normalize_display_name("\n")
     with pytest.raises(AuthError):
         normalize_email("not-an-email")
+
+
+def test_invalid_login_email_is_normalized_without_exposing_validation() -> None:
+    raw = "  NOT AN EMAIL  " + "x" * 400
+
+    normalized = normalize_email_for_login(raw)
+
+    assert normalized == raw.strip().casefold()[:320]

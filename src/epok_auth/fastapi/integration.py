@@ -1,5 +1,8 @@
 # pyright: reportUnusedFunction=false
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, field
+from inspect import isawaitable
 from typing import Annotated, Any, Self, cast
 from uuid import UUID
 
@@ -49,6 +52,7 @@ from epok_auth.store import AuthStore
 
 PrincipalDependency = Principal
 SafeAuthRoute = APIRoute
+_ValidationErrorHandler = Callable[[Request, Exception], Response | Awaitable[Response]]
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -63,14 +67,18 @@ class EpokAuth:
         service: AuthService | None = None,
         passkeys: PasskeyService | None = None,
         google: GoogleLoginService | None = None,
+        google_store: GoogleStore | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
         self.service = service or AuthService(store=store, settings=settings)
         self.passkeys = passkeys
         self.google = google
+        self.google_store = google_store
         self._http = AuthHttpTransport(settings)
-        self._prefixes: set[str] = set()
+        self._resources = AsyncExitStack()
+        self._app: FastAPI | None = None
+        self._owns_resources = google_store is not None and google is None
 
     @classmethod
     def postgres(
@@ -91,7 +99,28 @@ class EpokAuth:
             max_overflow=max_overflow,
             pool_timeout=pool_timeout,
         )
-        return cls(settings=settings, store=store)
+        auth = cls(settings=settings, store=store, google_store=store)
+        auth._resources.push_async_callback(store.aclose)
+        auth._owns_resources = True
+        return auth
+
+    @asynccontextmanager
+    async def lifespan(self, app: FastAPI) -> AsyncGenerator[None, None]:
+        try:
+            yield
+        finally:
+            state = getattr(app.state, "_epok_auth_install_state", None)
+            facades = list(state.facades) if isinstance(state, _AuthInstallState) else []
+            if self not in facades:
+                facades.append(self)
+            cleanup = AsyncExitStack()
+            for facade in facades:
+                cleanup.push_async_callback(facade.aclose)
+            await cleanup.aclose()
+
+    async def aclose(self) -> None:
+        """Close resources created internally by this facade."""
+        await self._resources.aclose()
 
     def install(
         self,
@@ -122,7 +151,11 @@ class EpokAuth:
                     prefix=normalized_prefix + "/" + admin_prefix.strip("/")
                 )
 
-        self._prefixes.add(normalized_prefix)
+        install_state = _install_state(app)
+        if self._owns_resources and self._app is not None and self._app is not app:
+            raise ValueError("an EpokAuth resource owner cannot be installed in multiple apps")
+        install_state.register(normalized_prefix, self)
+        self._app = app
         app.include_router(auth_router)
         if admin_router is not None:
             app.include_router(admin_router)
@@ -132,10 +165,14 @@ class EpokAuth:
             app.include_router(google_router)
         if google_admin_router is not None:
             app.include_router(google_admin_router)
-        if not getattr(app.state, "_epok_auth_handlers_installed", False):
-            app.add_exception_handler(AuthError, self._auth_error_handler)  # type: ignore[arg-type]
-            app.add_exception_handler(RequestValidationError, self._validation_error_handler)  # type: ignore[arg-type]
-            app.state._epok_auth_handlers_installed = True
+        if not install_state.handlers_installed:
+            install_state.validation_fallback = cast(
+                _ValidationErrorHandler | None,
+                app.exception_handlers.get(RequestValidationError),
+            )
+            app.add_exception_handler(AuthError, _auth_error_handler)  # type: ignore[arg-type]
+            app.add_exception_handler(RequestValidationError, _validation_error_handler)  # type: ignore[arg-type]
+            install_state.handlers_installed = True
 
     def router(self, *, prefix: str = "/auth") -> APIRouter:
         router = APIRouter(prefix=prefix, tags=["authentication"])
@@ -457,16 +494,24 @@ class EpokAuth:
     def _google_service(self) -> GoogleLoginService:
         if self.google is not None:
             return self.google
+        if self.settings.google_client_id is None:
+            raise ValueError("google_client_id is required when Google Sign-In is enabled")
         try:
             from epok_auth.google.google_auth import GoogleAuthVerifier
-        except ImportError as error:
+        except ImportError as error:  # pragma: no cover - isolated artifact smoke test
             raise RuntimeError('Google Sign-In requires: uv add "epok-auth[google]"') from error
+        if self.google_store is None:
+            raise ValueError(
+                "google_store or a configured GoogleLoginService is required for Google Sign-In"
+            )
         verifier = GoogleAuthVerifier(
             timeout_seconds=self.settings.google_token_timeout_seconds,
             max_credential_chars=self.settings.google_max_credential_chars,
         )
+        self._resources.callback(verifier.close)
+        self._owns_resources = True
         self.google = GoogleLoginService(
-            store=cast(GoogleStore, self.store),
+            store=self.google_store,
             settings=self.settings,
             signer=self.service.signer,
             verifier=verifier,
@@ -475,29 +520,62 @@ class EpokAuth:
         )
         return self.google
 
-    async def _auth_error_handler(self, request: Request, error: AuthError) -> JSONResponse:
-        request_id = getattr(request.state, "request_id", None)
-        registrar(error, contexto=request.url.path)
-        response = error_response(error, request_id)
-        self._http.disable_cache(response)
-        return response
 
-    async def _validation_error_handler(
-        self,
-        request: Request,
-        error: RequestValidationError,
-    ) -> JSONResponse:
-        if any(request.url.path.startswith(prefix) for prefix in self._prefixes):
-            response = JSONResponse(
-                status_code=422,
-                content={
-                    "code": AuthErrorCode.INPUT_INVALID.value,
-                    "detail": "The request does not match the expected authentication contract.",
-                    "request_id": getattr(request.state, "request_id", None),
-                },
-            )
-            self._http.disable_cache(response)
-            return response
+@dataclass(slots=True)
+class _AuthInstallState:
+    prefixes: set[str] = field(default_factory=set[str])
+    facades: list[EpokAuth] = field(default_factory=list[EpokAuth])
+    handlers_installed: bool = False
+    validation_fallback: _ValidationErrorHandler | None = None
+
+    def register(self, prefix: str, facade: EpokAuth) -> None:
+        if prefix in self.prefixes:
+            raise ValueError(f"epok-auth is already installed at {prefix}")
+        self.prefixes.add(prefix)
+        if facade not in self.facades:
+            self.facades.append(facade)
+
+
+def _install_state(app: FastAPI) -> _AuthInstallState:
+    state = getattr(app.state, "_epok_auth_install_state", None)
+    if state is None:
+        state = _AuthInstallState()
+        app.state._epok_auth_install_state = state
+    return state
+
+
+async def _auth_error_handler(request: Request, error: AuthError) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None)
+    registrar(error, contexto=request.url.path)
+    response = error_response(error, request_id)
+    AuthHttpTransport.disable_cache(response)
+    return response
+
+
+async def _validation_error_handler(
+    request: Request,
+    error: RequestValidationError,
+) -> Response:
+    prefixes = _install_state(request.app).prefixes
+    path = request.url.path
+    belongs_to_auth = any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
+    if belongs_to_auth:
+        response = JSONResponse(
+            status_code=422,
+            content={
+                "code": AuthErrorCode.INPUT_INVALID.value,
+                "detail": "The request does not match the expected authentication contract.",
+                "request_id": getattr(request.state, "request_id", None),
+            },
+        )
+        AuthHttpTransport.disable_cache(response)
+        return response
+    fallback = _install_state(request.app).validation_fallback
+    if fallback is None:
         from fastapi.exception_handlers import request_validation_exception_handler
 
         return await request_validation_exception_handler(request, error)
+    response = fallback(request, error)
+    if isawaitable(response):
+        return await response
+    return response

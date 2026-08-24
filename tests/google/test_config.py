@@ -4,9 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 from epok_auth.config import AuthSettings, Environment, GoogleAccountMode
+from epok_auth.google import GoogleStore, GoogleTransaction
 from epok_auth.google.models import GoogleChallenge, GoogleChallengePurpose, GoogleClaims
+from epok_auth.google.service import GoogleLoginService
+from epok_auth.service import AuthService
+from epok_auth.testing import MemoryAuthStore
 from tests.conftest import MutableClock
-from tests.google.fakes import CLIENT_ID, ORIGIN
+from tests.google.fakes import CLIENT_ID, ORIGIN, FakeGoogleVerifier
 
 SECRET = "google-config-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
@@ -25,12 +29,32 @@ def _settings(**overrides: object) -> AuthSettings:
     return AuthSettings(**values)  # type: ignore[arg-type]
 
 
+def test_google_store_contracts_are_public() -> None:
+    assert GoogleStore is not None
+    assert GoogleTransaction is not None
+
+
 def test_google_defaults_to_linked_only_without_affecting_base_install() -> None:
     settings = _settings()
 
     assert settings.google_client_id is None
     assert settings.google_account_mode is GoogleAccountMode.LINKED_ONLY
     assert settings.google_hosted_domains == ()
+
+
+def test_google_service_requires_client_id() -> None:
+    settings = _settings()
+    store = MemoryAuthStore()
+    auth = AuthService(store=store, settings=settings)
+
+    with pytest.raises(ValueError, match="google_client_id"):
+        GoogleLoginService(
+            store=store,
+            settings=settings,
+            signer=auth.signer,
+            verifier=FakeGoogleVerifier(),
+            passwords=auth.passwords,
+        )
 
 
 def test_google_environment_settings_parse_mode_and_hosted_domains(

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-08-24
 
 - add optional Google Sign-In through the official `google-auth` verifier;
 - add linked-only, preauthorized and open account policies with safe defaults;
@@ -11,7 +11,9 @@
 - reject open registration when the default role equals the administrative role;
 - prevent password attempts from locking Google-only accounts;
 - add HTTP, policy, concurrency, protocol, PostgreSQL and browser flow tests;
-- add a local Google button sandbox and Spanish integration guide.
+- add a local Google button sandbox and Spanish integration guide;
+- isolate epok-auth Alembic history from host applications and safely adopt published legacy
+  revisions.
 
 ## 0.2.1 - 2026-08-21
 

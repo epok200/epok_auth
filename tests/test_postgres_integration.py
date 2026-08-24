@@ -1,6 +1,9 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 
@@ -8,12 +11,19 @@ psycopg = pytest.importorskip("psycopg")
 
 from epok_auth.config import AuthSettings, Environment, GoogleAccountMode
 from epok_auth.errors import AuthError, AuthErrorCode
+from epok_auth.google.models import (
+    GOOGLE_ISSUER,
+    ExternalIdentity,
+    GoogleChallenge,
+    GoogleChallengePurpose,
+)
 from epok_auth.migrate import check_database, downgrade_database, upgrade_database
-from epok_auth.models import UserUpdate
+from epok_auth.models import UserStatus, UserUpdate
 from epok_auth.passkeys.service import PasskeyService
 from epok_auth.passkeys.webauthn import WebAuthnAdapter
 from epok_auth.postgres import PostgresAuthStore
 from epok_auth.service import AuthService
+from epok_auth.store import StoreConflictError
 from tests.google.fakes import CLIENT_ID
 from tests.passkeys.virtual_authenticator import VirtualAuthenticator, decode_base64url
 
@@ -155,6 +165,138 @@ async def test_duplicate_user_conflict_rolls_back_transaction(
     users = await service.list_users()
     assert len(users) == 1
     assert users[0].display_name == "Original"
+
+
+@pytest.mark.asyncio
+async def test_last_active_admin_cannot_be_disabled(
+    store: PostgresAuthStore,
+    settings: AuthSettings,
+) -> None:
+    service = AuthService(store=store, settings=settings)
+    admin = await service.create_admin(
+        email="admin@example.com",
+        display_name="Admin",
+        password=ADMIN_PASSWORD,
+    )
+
+    with pytest.raises(AuthError) as captured:
+        await service.update_user(admin.id, UserUpdate(status=UserStatus.DISABLED))
+
+    assert captured.value.code is AuthErrorCode.LAST_ADMIN_REQUIRED
+    assert (await service.get_user(admin.id)).status is UserStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_enforces_user_and_session_mutation_contracts(
+    store: PostgresAuthStore,
+    settings: AuthSettings,
+) -> None:
+    service = AuthService(store=store, settings=settings)
+    admin = await service.create_admin(
+        email="admin@example.com",
+        display_name="Admin",
+        password=ADMIN_PASSWORD,
+    )
+    first = await service.login(admin.email, ADMIN_PASSWORD)
+    second = await service.login(admin.email, ADMIN_PASSWORD)
+    async with store.transaction() as transaction:
+        stored_user = await transaction.get_user_by_email(admin.email)
+        first_session = await transaction.get_session_by_id(first.principal.session_id)
+        second_session = await transaction.get_session_by_id(second.principal.session_id)
+
+    assert stored_user is not None
+    assert stored_user.id == admin.id
+    assert first_session is not None
+    assert second_session is not None
+
+    async with store.transaction() as transaction:
+        locked_session = await transaction.get_session_by_token_hash(
+            first_session.token_hash,
+            for_update=True,
+        )
+    assert locked_session is not None
+    assert locked_session.id == first_session.id
+
+    with pytest.raises(KeyError):
+        async with store.transaction() as transaction:
+            await transaction.update_user(replace(admin, id=uuid4()))
+    with pytest.raises(StoreConflictError):
+        async with store.transaction() as transaction:
+            await transaction.insert_session(first_session)
+    with pytest.raises(StoreConflictError):
+        async with store.transaction() as transaction:
+            await transaction.update_session(
+                replace(first_session, token_hash=second_session.token_hash)
+            )
+    with pytest.raises(KeyError):
+        async with store.transaction() as transaction:
+            await transaction.update_session(replace(first_session, id=uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_enforces_google_persistence_contracts(
+    store: PostgresAuthStore,
+    settings: AuthSettings,
+) -> None:
+    service = AuthService(store=store, settings=settings)
+    admin = await service.create_admin(
+        email="admin@example.com",
+        display_name="Admin",
+        password=ADMIN_PASSWORD,
+    )
+    second = await service.create_user(email="second@example.com", display_name="Second")
+    now = datetime.now(UTC)
+    challenge = GoogleChallenge(
+        id=uuid4(),
+        purpose=GoogleChallengePurpose.LOGIN,
+        nonce="n" * 32,
+        origin=ORIGIN,
+        client_id=CLIENT_ID,
+        created_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+    first_identity = ExternalIdentity(
+        id=uuid4(),
+        user_id=admin.id,
+        issuer=GOOGLE_ISSUER,
+        subject="first-subject",
+        email=admin.email,
+        created_at=now,
+    )
+    second_identity = replace(
+        first_identity,
+        id=uuid4(),
+        user_id=second.user.id,
+        subject="second-subject",
+        email=second.user.email,
+    )
+    async with store.transaction() as transaction:
+        await transaction.insert_google_challenge(challenge)
+        await transaction.insert_external_identity(first_identity)
+        await transaction.insert_external_identity(second_identity)
+
+    with pytest.raises(StoreConflictError):
+        async with store.transaction() as transaction:
+            await transaction.insert_google_challenge(replace(challenge, id=uuid4()))
+    with pytest.raises(StoreConflictError):
+        async with store.transaction() as transaction:
+            await transaction.insert_external_identity(replace(first_identity, id=uuid4()))
+    with pytest.raises(StoreConflictError):
+        async with store.transaction() as transaction:
+            await transaction.update_user(replace(second.user, email=admin.email))
+    with pytest.raises(StoreConflictError):
+        async with store.transaction() as transaction:
+            await transaction.update_external_identity(
+                replace(first_identity, subject=second_identity.subject)
+            )
+    with pytest.raises(KeyError):
+        async with store.transaction() as transaction:
+            await transaction.update_external_identity(
+                replace(first_identity, id=uuid4(), subject="missing-subject")
+            )
+    with pytest.raises(KeyError):
+        async with store.transaction() as transaction:
+            await transaction.delete_external_identity(uuid4())
 
 
 @pytest.mark.asyncio

@@ -2,15 +2,15 @@
 
 This document maps beta capabilities to executable evidence. It is not a claim that vulnerabilities are impossible.
 
-## Published evidence snapshot
+## Release evidence snapshot
 
-The published `0.2.1` release was accepted by the standalone library gate after all of the
+The `0.3.0` release was accepted by the standalone library gate after all of the
 following completed successfully on a clean GitHub runner:
 
-- 205 tests pass, including PostgreSQL integration and concurrency cases;
-- the browser reference client passes a Node unit proof and a real Chromium flow;
-- branch-aware coverage reaches 94.53%;
-- the non-integration suite passes on Python 3.12, 3.13 and 3.14;
+- 321 tests pass with disposable PostgreSQL, including migration and concurrency cases;
+- the passkey and Google browser reference clients pass their real Chromium flows;
+- branch-aware coverage reaches 98.16%;
+- 299 non-integration tests pass on Python 3.12, 3.13 and 3.14;
 - PostgreSQL 17 migrates from an empty database and Alembic reports no metadata drift;
 - Ruff formatting, lint and security rules pass;
 - Pyright strict passes for production source;
@@ -20,16 +20,9 @@ following completed successfully on a clean GitHub runner:
 - CodeQL `security-extended` completes successfully;
 - the aggregate `CI / merge-gate` is green.
 
-The Google rows below describe the unreleased `0.3` candidate. They do not claim that Google
-Sign-In exists in the published `0.2.1` artifact. The candidate is releasable only after its own
-clean `CI / merge-gate` and CodeQL run succeed.
-
-The current candidate passes 270 Python tests with disposable PostgreSQL, including five
-coordinated Google concurrency cases. Its 258 non-integration tests pass on Python 3.12, 3.13 and
-3.14, branch-aware coverage reaches 90.40%, and the passkey and Google Chromium flows pass. Ruff,
-Pyright, `pip-audit`, both npm audits, artifact allowlists and isolated base/full-extra installs are
-also clean. PostgreSQL 17, CodeQL and the aggregate merge gate remain required CI evidence before
-publication.
+The gate also verifies Pyright strict, `pip-audit`, both npm audits, artifact allowlists and
+isolated base and full-extra installations. This evidence applies to the standalone library;
+product deployment still requires the controls listed at the end of this document.
 
 ## Capability map
 
@@ -64,7 +57,7 @@ publication.
 | Secret redaction | Validation and auth responses do not echo submitted secrets | HTTP and CLI tests |
 | Audit IP integrity | Direct clients cannot spoof event IPs with forwarding headers | HTTP abuse tests |
 | Configuration | Production rejects weak secrets, insecure cookies and ambiguous origins | `test_config.py` |
-| Migration safety | Empty-database migration commits and schema metadata remains drift-free | PostgreSQL 17 job and `test_migrate.py` |
+| Migration safety | epok-auth owns a dedicated Alembic history, preserves a host application's history and adopts only trusted legacy epok-auth revisions | PostgreSQL 17 job, `test_migrate.py` and `test_migration_isolation_integration.py` |
 | Packaging | Built wheel imports and exposes CLI in an isolated environment | GitHub Actions package job |
 | Optional Google install | Base artifact imports without Google dependencies and the `google` extra loads the official adapter | artifact smoke tests |
 | Compatibility | Core suite passes Python 3.12, 3.13 and 3.14 | GitHub Actions matrix |

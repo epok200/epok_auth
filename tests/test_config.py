@@ -133,6 +133,20 @@ def test_rejects_invalid_capability_defaults() -> None:
 
 
 @pytest.mark.parametrize(
+    "field,value",
+    [
+        ("issuer", "   "),
+        ("audience", "api\ncontrol"),
+        ("google_client_id", "not-a-google-client"),
+        ("google_client_id", "client id.apps.googleusercontent.com"),
+    ],
+)
+def test_rejects_ambiguous_identity_configuration(field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        make(**{field: value})
+
+
+@pytest.mark.parametrize(
     "rp_id",
     [
         "https://example.com",

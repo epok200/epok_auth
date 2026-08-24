@@ -1,6 +1,9 @@
 import httpx
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import SecretStr
 
 from epok_auth import AuthSettings, EpokAuth
 from epok_auth.models import Principal
@@ -8,6 +11,18 @@ from epok_auth.testing import MemoryAuthStore
 from tests.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, NEW_PASSWORD
 
 ORIGIN = "http://localhost:3000"
+
+
+class ClosingMemoryStore(MemoryAuthStore):
+    def __init__(self, close_error: Exception | None = None) -> None:
+        super().__init__()
+        self.close_calls = 0
+        self.close_error = close_error
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        if self.close_error is not None:
+            raise self.close_error
 
 
 async def client_for(
@@ -44,6 +59,93 @@ async def client_for(
     app.include_router(scoped)
     transport = httpx.ASGITransport(app=app)
     return auth, httpx.AsyncClient(transport=transport, base_url="http://testserver")
+
+
+def test_postgres_factory_requires_database_url(settings: AuthSettings) -> None:
+    with pytest.raises(ValueError, match="database_url"):
+        EpokAuth.postgres(settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_postgres_factory_forwards_pool_configuration(
+    settings: AuthSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured = settings.model_copy(
+        update={"database_url": SecretStr("postgresql://user:pass@db/tests")}
+    )
+    received: dict[str, object] = {}
+
+    store = ClosingMemoryStore()
+
+    class StoreFactory:
+        @classmethod
+        def from_url(cls, url: str, **options: object) -> MemoryAuthStore:
+            received.update(url=url, **options)
+            return store
+
+    import epok_auth.postgres
+
+    monkeypatch.setattr(epok_auth.postgres, "PostgresAuthStore", StoreFactory)
+
+    auth = EpokAuth.postgres(
+        settings=configured,
+        pool_size=7,
+        max_overflow=11,
+        pool_timeout=3.5,
+    )
+
+    assert auth.store is store
+    assert auth.google_store is store
+    assert received == {
+        "url": "postgresql://user:pass@db/tests",
+        "pool_size": 7,
+        "max_overflow": 11,
+        "pool_timeout": 3.5,
+    }
+
+    async with auth.lifespan(FastAPI()):
+        assert store.close_calls == 0
+    await auth.aclose()
+    assert store.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_app_lifespan_closes_every_installed_facade(
+    settings: AuthSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured = settings.model_copy(
+        update={"database_url": SecretStr("postgresql://user:pass@db/tests")}
+    )
+    first_store = ClosingMemoryStore()
+    second_store = ClosingMemoryStore(RuntimeError("second pool failed to close"))
+    available_stores = iter((first_store, second_store))
+
+    class StoreFactory:
+        @classmethod
+        def from_url(cls, url: str, **options: object) -> MemoryAuthStore:
+            del url, options
+            return next(available_stores)
+
+    import epok_auth.postgres
+
+    monkeypatch.setattr(epok_auth.postgres, "PostgresAuthStore", StoreFactory)
+    first = EpokAuth.postgres(settings=configured)
+    second = EpokAuth.postgres(settings=configured)
+    app = FastAPI(lifespan=first.lifespan)
+    first.install(app, prefix="/first")
+    second.install(app, prefix="/second")
+    with pytest.raises(ValueError, match="resource owner"):
+        first.install(FastAPI(), prefix="/third")
+
+    with pytest.raises(RuntimeError, match="second pool failed"):
+        async with first.lifespan(app):
+            assert first_store.close_calls == second_store.close_calls == 0
+
+    assert first_store.close_calls == second_store.close_calls == 1
+    await second.aclose()
+    assert second_store.close_calls == 1
 
 
 async def login(client: httpx.AsyncClient, password: str = ADMIN_PASSWORD) -> httpx.Response:
@@ -150,6 +252,102 @@ async def test_login_validation_redacts_password(settings: AuthSettings) -> None
     assert response.json()["code"] == "AUTH_INPUT_INVALID"
     assert secret not in response.text
     assert "unexpected" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_validation_outside_auth_uses_fastapi_default_response(
+    settings: AuthSettings,
+) -> None:
+    app = FastAPI()
+    auth = EpokAuth(settings=settings, store=MemoryAuthStore())
+    auth.install(app)
+
+    @app.get("/outside/{value}")
+    async def outside(value: int) -> dict[str, int]:
+        return {"value": value}
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/outside/not-an-integer")
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+    assert "code" not in response.json()
+
+
+@pytest.mark.asyncio
+async def test_validation_requires_a_complete_auth_prefix_match(
+    settings: AuthSettings,
+) -> None:
+    app = FastAPI()
+    auth = EpokAuth(settings=settings, store=MemoryAuthStore())
+    auth.install(app, prefix="/auth")
+
+    @app.get("/authentication/{value}")
+    async def outside(value: int) -> dict[str, int]:
+        return {"value": value}
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/authentication/not-an-integer")
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+    assert "code" not in response.json()
+
+
+@pytest.mark.asyncio
+async def test_install_preserves_the_product_validation_handler(
+    settings: AuthSettings,
+) -> None:
+    app = FastAPI()
+
+    @app.exception_handler(RequestValidationError)
+    def product_validation_handler(
+        request: Request,
+        error: RequestValidationError,
+    ) -> JSONResponse:
+        del request, error
+        return JSONResponse(status_code=400, content={"handled_by": "product"})
+
+    auth = EpokAuth(settings=settings, store=MemoryAuthStore())
+    auth.install(app, prefix="/auth")
+
+    @app.get("/outside/{value}")
+    async def outside(value: int) -> dict[str, int]:
+        return {"value": value}
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        outside_response = await client.get("/outside/not-an-integer")
+        auth_response = await client.post("/auth/login", json={})
+
+    assert outside_response.status_code == 400
+    assert outside_response.json() == {"handled_by": "product"}
+    assert auth_response.status_code == 422
+    assert auth_response.json()["code"] == "AUTH_INPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_multiple_instances_share_handlers_and_reject_duplicate_prefixes(
+    settings: AuthSettings,
+) -> None:
+    app = FastAPI()
+    first = EpokAuth(settings=settings, store=MemoryAuthStore())
+    second = EpokAuth(settings=settings, store=MemoryAuthStore())
+    first.install(app, prefix="/first")
+    first.install(app, prefix="/first-alias")
+    second.install(app, prefix="/second")
+
+    with pytest.raises(ValueError, match="already installed"):
+        second.install(app, prefix="/first")
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/second/login", json={})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "AUTH_INPUT_INVALID"
 
 
 @pytest.mark.asyncio

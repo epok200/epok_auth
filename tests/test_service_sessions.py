@@ -1,5 +1,7 @@
 import asyncio
-from datetime import timedelta
+from dataclasses import replace
+from datetime import datetime, timedelta
+from uuid import uuid4
 
 import pytest
 
@@ -125,6 +127,40 @@ async def test_refresh_rotates_and_preserves_absolute_deadline(
 
 
 @pytest.mark.asyncio
+async def test_refresh_rejects_unknown_token(service: AuthService) -> None:
+    with pytest.raises(AuthError) as captured:
+        await service.refresh(
+            "unknown-refresh-token",
+            "matching-csrf",
+            "matching-csrf",
+            origin="http://localhost:3000",
+        )
+
+    assert captured.value.code is AuthErrorCode.INVALID_TOKEN
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_revoked_session(
+    service: AuthService,
+    store: MemoryAuthStore,
+    clock: MutableClock,
+) -> None:
+    bundle = await create_admin_and_login(service)
+    session_id = bundle.principal.session_id
+    store.sessions[session_id] = replace(store.sessions[session_id], revoked_at=clock.value)
+
+    with pytest.raises(AuthError) as captured:
+        await service.refresh(
+            bundle.refresh_token,
+            bundle.csrf_token,
+            bundle.csrf_token,
+            origin="http://localhost:3000",
+        )
+
+    assert captured.value.code is AuthErrorCode.INVALID_TOKEN
+
+
+@pytest.mark.asyncio
 async def test_refresh_reuse_revokes_entire_family(service: AuthService) -> None:
     first = await create_admin_and_login(service)
     second = await service.refresh(
@@ -205,6 +241,44 @@ async def test_refresh_rejects_csrf_and_origin_without_consuming_token(
 
 
 @pytest.mark.asyncio
+async def test_refresh_rejects_csrf_that_does_not_match_stored_session(
+    service: AuthService,
+) -> None:
+    bundle = await create_admin_and_login(service)
+
+    with pytest.raises(AuthError) as captured:
+        await service.refresh(
+            bundle.refresh_token,
+            "attacker-csrf",
+            "attacker-csrf",
+            origin="http://localhost:3000",
+        )
+
+    assert captured.value.code is AuthErrorCode.INVALID_CSRF
+
+
+@pytest.mark.asyncio
+async def test_refresh_revokes_family_when_account_becomes_inactive(
+    service: AuthService,
+    store: MemoryAuthStore,
+) -> None:
+    bundle = await create_admin_and_login(service)
+    user_id = bundle.principal.user_id
+    store.users[user_id] = replace(store.users[user_id], status=UserStatus.DISABLED)
+
+    with pytest.raises(AuthError) as captured:
+        await service.refresh(
+            bundle.refresh_token,
+            bundle.csrf_token,
+            bundle.csrf_token,
+            origin="http://localhost:3000",
+        )
+
+    assert captured.value.code is AuthErrorCode.INVALID_TOKEN
+    assert all(session.revoked_at is not None for session in store.sessions.values())
+
+
+@pytest.mark.asyncio
 async def test_idle_and_absolute_expiry_are_enforced(
     service: AuthService,
     clock: MutableClock,
@@ -275,6 +349,23 @@ async def test_logout_is_idempotent_and_csrf_protected(service: AuthService) -> 
 
 
 @pytest.mark.asyncio
+async def test_logout_rejects_csrf_that_does_not_match_stored_session(
+    service: AuthService,
+) -> None:
+    bundle = await create_admin_and_login(service)
+
+    with pytest.raises(AuthError) as captured:
+        await service.logout(
+            bundle.refresh_token,
+            "attacker-csrf",
+            "attacker-csrf",
+            origin="http://localhost:3000",
+        )
+
+    assert captured.value.code is AuthErrorCode.INVALID_CSRF
+
+
+@pytest.mark.asyncio
 async def test_change_password_revokes_old_family_and_starts_fresh_session(
     service: AuthService,
 ) -> None:
@@ -295,6 +386,19 @@ async def test_change_password_revokes_old_family_and_starts_fresh_session(
     assert (
         await service.login(ADMIN_EMAIL, NEW_PASSWORD)
     ).principal.user_id == old.principal.user_id
+
+
+@pytest.mark.asyncio
+async def test_change_password_rejects_principal_from_another_session(
+    service: AuthService,
+) -> None:
+    bundle = await create_admin_and_login(service)
+    mismatched = replace(bundle.principal, family_id=uuid4())
+
+    with pytest.raises(AuthError) as captured:
+        await service.change_password(mismatched, ADMIN_PASSWORD, NEW_PASSWORD)
+
+    assert captured.value.code is AuthErrorCode.INVALID_TOKEN
 
 
 @pytest.mark.asyncio
@@ -334,3 +438,25 @@ def test_origin_canonicalization_is_fail_closed() -> None:
     assert canonical_origin("https://example.com/path") == ""
     assert canonical_origin("https://example.com:invalid") == ""
     assert canonical_origin("not-an-origin") == ""
+
+
+def test_origin_can_be_omitted_only_when_validation_is_disabled(
+    settings,
+    store: MemoryAuthStore,
+) -> None:
+    relaxed = settings.model_copy(update={"require_origin": False})
+    service = AuthService(store=store, settings=relaxed)
+
+    service.validate_origin(None)
+
+
+@pytest.mark.asyncio
+async def test_service_rejects_naive_clock(settings, store: MemoryAuthStore) -> None:
+    service = AuthService(
+        store=store,
+        settings=settings,
+        clock=lambda: datetime(2026, 8, 4, 12, 0),  # noqa: DTZ001
+    )
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        await service.create_user(email="clock@example.com", display_name="Clock")

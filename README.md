@@ -4,9 +4,9 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-> **Status:** `0.2.1` is the public beta on PyPI with WebAuthn passkeys. This branch is an
-> unreleased `0.3` candidate that adds Google Sign-In and keeps the existing version until review
-> and release approval. Public APIs may still change before `1.0`.
+> **Status:** `0.3.0` is the current public beta with WebAuthn passkeys, Google Sign-In and
+> isolated Alembic history for host application compatibility. Public APIs may still change
+> before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -16,8 +16,8 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 | Gate | Evidence |
 |---|---|
-| Functional and adversarial tests | 205/205 passing, plus two browser client proofs |
-| Branch coverage | 94.53% |
+| Functional and adversarial tests | 321/321 passing, plus passkey and Google browser proofs |
+| Branch coverage | 98.16% |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |
@@ -27,7 +27,7 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 The repository does not claim that vulnerabilities are impossible. The green gate establishes reproducible evidence for the defined beta threat model and invariants.
 
-## What the source candidate includes
+## What 0.3.0 includes
 
 - Argon2id password hashing through `pwdlib`, with rehash support and dummy verification;
 - local users, active/disabled state, roles, scopes, administrative provisioning and reset;
@@ -128,7 +128,7 @@ from epok_auth import AuthSettings, EpokAuth, Principal
 settings = AuthSettings()
 auth = EpokAuth.postgres(settings=settings)
 
-app = FastAPI()
+app = FastAPI(lifespan=auth.lifespan)
 auth.install(
     app,
     prefix="/api/v1/auth",

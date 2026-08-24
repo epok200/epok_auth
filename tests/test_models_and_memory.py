@@ -5,6 +5,12 @@ from uuid import uuid4
 import pytest
 
 from epok_auth.errors import AuthError, AuthErrorCode, forbidden, invalid_csrf, invalid_session
+from epok_auth.google.models import (
+    GOOGLE_ISSUER,
+    ExternalIdentity,
+    GoogleChallenge,
+    GoogleChallengePurpose,
+)
 from epok_auth.models import (
     Principal,
     RefreshSession,
@@ -130,6 +136,66 @@ async def test_memory_store_enforces_unique_users_and_sessions() -> None:
         await transaction.insert_session(first_session)
         with pytest.raises(StoreConflictError):
             await transaction.insert_session(same_hash)
+
+
+@pytest.mark.asyncio
+async def test_memory_store_rejects_duplicate_email_during_update() -> None:
+    store = MemoryAuthStore()
+    first = user("first@example.com")
+    second = user("second@example.com")
+
+    async with store.transaction() as transaction:
+        await transaction.insert_user(first)
+        await transaction.insert_user(second)
+        with pytest.raises(StoreConflictError):
+            await transaction.update_user(replace(second, email=first.email))
+
+    assert store.users[second.id].email == "second@example.com"
+
+
+@pytest.mark.asyncio
+async def test_memory_store_enforces_unique_google_challenges() -> None:
+    store = MemoryAuthStore()
+    challenge = GoogleChallenge(
+        id=uuid4(),
+        purpose=GoogleChallengePurpose.LOGIN,
+        nonce="n" * 32,
+        origin="http://localhost:3000",
+        client_id="123456789-test.apps.googleusercontent.com",
+        created_at=NOW,
+        expires_at=NOW + timedelta(minutes=5),
+    )
+
+    async with store.transaction() as transaction:
+        await transaction.insert_google_challenge(challenge)
+        with pytest.raises(StoreConflictError):
+            await transaction.insert_google_challenge(replace(challenge, id=uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_memory_store_enforces_external_identity_contract() -> None:
+    store = MemoryAuthStore()
+    account = user()
+    identity = ExternalIdentity(
+        id=uuid4(),
+        user_id=account.id,
+        issuer=GOOGLE_ISSUER,
+        subject="google-subject",
+        email=account.email,
+        created_at=NOW,
+    )
+
+    async with store.transaction() as transaction:
+        await transaction.insert_user(account)
+        await transaction.insert_external_identity(identity)
+        with pytest.raises(StoreConflictError):
+            await transaction.insert_external_identity(replace(identity, id=uuid4()))
+        with pytest.raises(KeyError):
+            await transaction.update_external_identity(
+                replace(identity, id=uuid4(), subject="missing-subject")
+            )
+        with pytest.raises(KeyError):
+            await transaction.delete_external_identity(uuid4())
 
 
 @pytest.mark.asyncio
