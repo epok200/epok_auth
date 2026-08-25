@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import jwt
@@ -9,6 +9,7 @@ from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.models import Principal
 from epok_auth.tokens import (
     HMACJWTSigner,
+    clock_now,
     create_csrf_token,
     create_refresh_token,
     secure_token_equals,
@@ -140,3 +141,14 @@ def test_issue_rejects_naive_datetime() -> None:
     subject = principal()
     with pytest.raises(ValueError, match="timezone-aware"):
         signer().issue(subject, now=datetime(2026, 8, 4, 12, 0))
+
+
+def test_clock_now_normalizes_to_utc() -> None:
+    local_time = datetime(2026, 8, 4, 6, 0, tzinfo=timezone(timedelta(hours=-6)))
+
+    assert clock_now(lambda: local_time) == NOW
+
+
+def test_clock_now_rejects_naive_datetime() -> None:
+    with pytest.raises(ValueError, match="clock must return a timezone-aware datetime"):
+        clock_now(lambda: datetime(2026, 8, 4, 12, 0))

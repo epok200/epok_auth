@@ -2,39 +2,43 @@ import asyncio
 import secrets
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from typing import TypeGuard
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+from epok_auth._events import EMPTY_CONTEXT, record_security_event
 from epok_auth._validation import canonical_origin
 from epok_auth.config import AuthSettings
 from epok_auth.errores import AuthError, AuthErrorCode, forbidden, invalid_session
 from epok_auth.models import (
     Principal,
     RequestContext,
-    SecurityEvent,
     SecurityEventType,
-    SecurityMetadata,
     SessionBundle,
     UserAccount,
 )
-from epok_auth.passkeys.adapter import CredentialPayload, PasskeyAdapter, PasskeyVerificationError
+from epok_auth.passkeys.adapter import (
+    CredentialPayload,
+    PasskeyAdapter,
+    PasskeyVerificationError,
+    VerifiedPasskeyAuthentication,
+)
 from epok_auth.passkeys.models import (
     PasskeyCeremonyPurpose,
     PasskeyChallenge,
     PasskeyCredential,
     PasskeyOptions,
 )
-from epok_auth.passkeys.store import PasskeyStore, PasskeyTransaction
+from epok_auth.passkeys.store import PasskeyStore
 from epok_auth.sessions import SessionIssuer
 from epok_auth.store import StoreConflictError
 from epok_auth.tokens import (
     AccessTokenSigner,
     Clock,
+    clock_now,
     utc_now,
 )
-
-_EMPTY_CONTEXT = RequestContext()
 
 
 class PasskeyService:
@@ -63,14 +67,13 @@ class PasskeyService:
         principal: Principal,
         origin: str | None,
     ) -> PasskeyOptions:
-        now = self._now()
+        now = clock_now(self.clock)
         self._require_recent_authentication(principal, now)
         expected_origin = self._validate_origin(origin)
         async with self.store.transaction() as transaction:
             user = await transaction.get_user_by_id(principal.user_id)
             if not _can_authenticate(user, now):
                 raise invalid_session()
-            assert user is not None
             existing = await transaction.list_passkeys(principal.user_id)
             if len(existing) >= self.settings.passkey_max_credentials_per_user:
                 raise AuthError(
@@ -96,9 +99,9 @@ class PasskeyService:
         credential: CredentialPayload,
         origin: str | None,
         *,
-        context: RequestContext = _EMPTY_CONTEXT,
+        context: RequestContext = EMPTY_CONTEXT,
     ) -> PasskeyCredential:
-        now = self._now()
+        now = clock_now(self.clock)
         self._require_recent_authentication(principal, now)
         expected_origin = self._validate_origin(origin)
         normalized_name = _normalize_name(name)
@@ -157,15 +160,8 @@ class PasskeyService:
                         "The account has reached its passkey limit.",
                     )
                 await transaction.insert_passkey(passkey)
-                assert user is not None
-                await transaction.update_user(
-                    replace(
-                        user,
-                        security_version=user.security_version + 1,
-                        updated_at=now,
-                    )
-                )
-                await self._event(
+                await transaction.update_user(user.advance_security_version(now))
+                await record_security_event(
                     transaction,
                     SecurityEventType.PASSKEY_REGISTERED,
                     now,
@@ -181,7 +177,7 @@ class PasskeyService:
         return passkey
 
     async def begin_authentication(self, origin: str | None) -> PasskeyOptions:
-        now = self._now()
+        now = clock_now(self.clock)
         expected_origin = self._validate_origin(origin)
         challenge = self._challenge(
             PasskeyCeremonyPurpose.AUTHENTICATION,
@@ -200,9 +196,9 @@ class PasskeyService:
         credential: CredentialPayload,
         origin: str | None,
         *,
-        context: RequestContext = _EMPTY_CONTEXT,
+        context: RequestContext = EMPTY_CONTEXT,
     ) -> SessionBundle:
-        now = self._now()
+        now = clock_now(self.clock)
         expected_origin = self._validate_origin(origin)
         challenge = await self._consume_challenge(
             ceremony_id,
@@ -232,22 +228,20 @@ class PasskeyService:
             if stored is None or stored.revoked_at is not None or not _can_authenticate(user, now):
                 failure = _invalid_authentication()
             else:
-                assert user is not None
-                try:
-                    verified = await asyncio.to_thread(
-                        self.adapter.verify_authentication,
-                        credential,
-                        challenge.challenge,
-                        expected_origin,
-                        stored,
-                    )
-                except PasskeyVerificationError:
+                verified = await self._verify_authentication(
+                    credential,
+                    challenge.challenge,
+                    expected_origin,
+                    stored,
+                )
+                if verified is None:
                     failure = _invalid_authentication()
                 else:
-                    if (
+                    credential_changed = (
                         verified.credential_id != stored.credential_id
                         or verified.device_type != stored.device_type
-                    ):
+                    )
+                    if credential_changed:
                         failure = _invalid_authentication()
                     else:
                         await transaction.update_passkey(
@@ -264,7 +258,7 @@ class PasskeyService:
                             now=now,
                             context=context,
                         )
-                        await self._event(
+                        await record_security_event(
                             transaction,
                             SecurityEventType.PASSKEY_LOGIN_SUCCEEDED,
                             now,
@@ -274,7 +268,7 @@ class PasskeyService:
                             metadata={"passkey_id": str(stored.id)},
                         )
             if failure is not None:
-                await self._event(
+                await record_security_event(
                     transaction,
                     SecurityEventType.PASSKEY_LOGIN_FAILED,
                     now,
@@ -297,9 +291,9 @@ class PasskeyService:
         passkey_id: UUID,
         origin: str | None,
         *,
-        context: RequestContext = _EMPTY_CONTEXT,
+        context: RequestContext = EMPTY_CONTEXT,
     ) -> None:
-        now = self._now()
+        now = clock_now(self.clock)
         self._require_recent_authentication(principal, now)
         self._validate_origin(origin)
         async with self.store.transaction() as transaction:
@@ -314,15 +308,8 @@ class PasskeyService:
             if not _can_authenticate(user, now):
                 raise invalid_session()
             await transaction.update_passkey(replace(credential, revoked_at=now))
-            assert user is not None
-            await transaction.update_user(
-                replace(
-                    user,
-                    security_version=user.security_version + 1,
-                    updated_at=now,
-                )
-            )
-            await self._event(
+            await transaction.update_user(user.advance_security_version(now))
+            await record_security_event(
                 transaction,
                 SecurityEventType.PASSKEY_REVOKED,
                 now,
@@ -356,7 +343,7 @@ class PasskeyService:
         context: RequestContext,
     ) -> None:
         async with self.store.transaction() as transaction:
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.PASSKEY_REGISTRATION_FAILED,
                 now,
@@ -371,7 +358,7 @@ class PasskeyService:
         context: RequestContext,
     ) -> None:
         async with self.store.transaction() as transaction:
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.PASSKEY_LOGIN_FAILED,
                 now,
@@ -379,27 +366,23 @@ class PasskeyService:
                 user_id=user_id,
             )
 
-    async def _event(
+    async def _verify_authentication(
         self,
-        transaction: PasskeyTransaction,
-        event_type: SecurityEventType,
-        now: datetime,
-        context: RequestContext,
-        *,
-        user_id: UUID | None = None,
-        session_id: UUID | None = None,
-        metadata: SecurityMetadata | None = None,
-    ) -> None:
-        await transaction.add_security_event(
-            SecurityEvent.from_request(
-                event_type,
-                now,
-                context=context,
-                user_id=user_id,
-                session_id=session_id,
-                metadata=metadata,
+        credential: CredentialPayload,
+        challenge: bytes,
+        origin: str,
+        stored: PasskeyCredential,
+    ) -> VerifiedPasskeyAuthentication | None:
+        try:
+            return await asyncio.to_thread(
+                self.adapter.verify_authentication,
+                credential,
+                challenge,
+                origin,
+                stored,
             )
-        )
+        except PasskeyVerificationError:
+            return None
 
     def _challenge(
         self,
@@ -444,14 +427,8 @@ class PasskeyService:
         if now - principal.authenticated_at > maximum:
             raise forbidden("Recent authentication is required to manage passkeys.")
 
-    def _now(self) -> datetime:
-        value = self.clock()
-        if value.tzinfo is None:
-            raise ValueError("clock must return a timezone-aware datetime")
-        return value.astimezone(UTC)
 
-
-def _can_authenticate(user: UserAccount | None, now: datetime) -> bool:
+def _can_authenticate(user: UserAccount | None, now: datetime) -> TypeGuard[UserAccount]:
     return user is not None and user.can_authenticate(now)
 
 

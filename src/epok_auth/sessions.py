@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
+from epok_auth._events import EMPTY_CONTEXT, record_security_event
 from epok_auth.config import AuthSettings
 from epok_auth.models import (
     Principal,
     RefreshSession,
     RequestContext,
-    SecurityEvent,
     SecurityEventType,
     SessionBundle,
     UserAccount,
@@ -18,8 +18,6 @@ from epok_auth.tokens import (
     create_refresh_token,
     token_hash,
 )
-
-_EMPTY_CONTEXT = RequestContext()
 
 
 class SessionIssuer:
@@ -38,7 +36,7 @@ class SessionIssuer:
         family_id: UUID | None = None,
         absolute_expires_at: datetime | None = None,
         authenticated_at: datetime | None = None,
-        context: RequestContext = _EMPTY_CONTEXT,
+        context: RequestContext = EMPTY_CONTEXT,
     ) -> SessionBundle:
         session_id = uuid4()
         family_id = family_id or uuid4()
@@ -66,14 +64,13 @@ class SessionIssuer:
         await transaction.insert_session(session)
         principal = principal_from_session(user, session)
         access_token, _ = self.signer.issue(principal, now=now)
-        await transaction.add_security_event(
-            SecurityEvent.from_request(
-                SecurityEventType.SESSION_CREATED,
-                now,
-                context=context,
-                user_id=user.id,
-                session_id=session_id,
-            )
+        await record_security_event(
+            transaction,
+            SecurityEventType.SESSION_CREATED,
+            now,
+            context,
+            user_id=user.id,
+            session_id=session_id,
         )
         return SessionBundle(
             access_token=access_token,

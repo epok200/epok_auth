@@ -2,19 +2,8 @@
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Annotated, Any, Self, cast
-from uuid import UUID
 
-from fastapi import (
-    APIRouter,
-    Cookie,
-    Depends,
-    FastAPI,
-    Header,
-    Query,
-    Request,
-    Response,
-    status,
-)
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -30,29 +19,17 @@ from epok_auth.fastapi._installation import (
     install_exception_handlers,
     install_state,
 )
+from epok_auth.fastapi._local import create_admin_router, create_auth_router
 from epok_auth.fastapi.email_links import (
     create_email_link_admin_router,
     create_email_link_router,
 )
 from epok_auth.fastapi.google import create_google_admin_router, create_google_router
 from epok_auth.fastapi.passkeys import create_passkey_router
-from epok_auth.fastapi.schemas import (
-    ChangePasswordRequest,
-    CreateUserRequest,
-    ErrorResponse,
-    LoginRequest,
-    PrincipalResponse,
-    ProvisionedUserResponse,
-    RevocationResponse,
-    SessionResponse,
-    UpdateUserRequest,
-    UserListResponse,
-    UserResponse,
-)
 from epok_auth.fastapi.transport import AuthHttpTransport
 from epok_auth.google.service import GoogleLoginService
 from epok_auth.google.store import GoogleStore
-from epok_auth.models import Principal, UserUpdate
+from epok_auth.models import Principal
 from epok_auth.passkeys.service import PasskeyService
 from epok_auth.passkeys.store import PasskeyStore
 from epok_auth.service import AuthService
@@ -192,195 +169,20 @@ class EpokAuth:
         install_exception_handlers(app)
 
     def router(self, *, prefix: str = "/auth") -> APIRouter:
-        router = APIRouter(prefix=prefix, tags=["authentication"])
-
-        @router.post(
-            "/login",
-            response_model=SessionResponse,
-            responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
+        return create_auth_router(
+            self.service,
+            self._http,
+            self.current_user,
+            prefix=prefix,
         )
-        async def login(
-            payload: LoginRequest,
-            request: Request,
-            response: Response,
-            origin: Annotated[str | None, Header(alias="Origin")] = None,
-        ) -> SessionResponse:
-            self.service.validate_origin(origin)
-            bundle = await self.service.login(
-                payload.email,
-                payload.password,
-                context=self._http.request_context(request),
-            )
-            self._http.set_session_cookies(response, bundle)
-            self._http.disable_cache(response)
-            return SessionResponse.from_bundle(bundle)
-
-        @router.post(
-            "/refresh",
-            response_model=SessionResponse,
-            responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
-        )
-        async def refresh(
-            request: Request,
-            response: Response,
-            refresh_token: Annotated[
-                str | None,
-                Cookie(alias=self.settings.effective_refresh_cookie_name),
-            ] = None,
-            csrf_cookie: Annotated[
-                str | None,
-                Cookie(alias=self.settings.effective_csrf_cookie_name),
-            ] = None,
-            csrf_header: Annotated[
-                str | None,
-                Header(alias=self.settings.csrf_header_name),
-            ] = None,
-            origin: Annotated[str | None, Header(alias="Origin")] = None,
-        ) -> SessionResponse:
-            bundle = await self.service.refresh(
-                refresh_token or "",
-                csrf_cookie or "",
-                csrf_header or "",
-                origin=origin,
-                context=self._http.request_context(request),
-            )
-            self._http.set_session_cookies(response, bundle)
-            self._http.disable_cache(response)
-            return SessionResponse.from_bundle(bundle)
-
-        @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-        async def logout(
-            request: Request,
-            refresh_token: Annotated[
-                str | None,
-                Cookie(alias=self.settings.effective_refresh_cookie_name),
-            ] = None,
-            csrf_cookie: Annotated[
-                str | None,
-                Cookie(alias=self.settings.effective_csrf_cookie_name),
-            ] = None,
-            csrf_header: Annotated[
-                str | None,
-                Header(alias=self.settings.csrf_header_name),
-            ] = None,
-            origin: Annotated[str | None, Header(alias="Origin")] = None,
-        ) -> Response:
-            await self.service.logout(
-                refresh_token,
-                csrf_cookie,
-                csrf_header,
-                origin=origin,
-                context=self._http.request_context(request),
-            )
-            response = Response(status_code=status.HTTP_204_NO_CONTENT)
-            self._http.delete_session_cookies(response)
-            self._http.disable_cache(response)
-            return response
-
-        @router.get("/me", response_model=PrincipalResponse)
-        async def me(
-            principal: Annotated[Principal, Depends(self.current_user)],
-        ) -> PrincipalResponse:
-            return PrincipalResponse.from_principal(principal)
-
-        @router.post("/change-password", response_model=SessionResponse)
-        async def change_password(
-            payload: ChangePasswordRequest,
-            request: Request,
-            response: Response,
-            principal: Annotated[Principal, Depends(self.current_user)],
-            origin: Annotated[str | None, Header(alias="Origin")] = None,
-        ) -> SessionResponse:
-            self.service.validate_origin(origin)
-            bundle = await self.service.change_password(
-                principal,
-                payload.current_password,
-                payload.new_password,
-                context=self._http.request_context(request),
-            )
-            self._http.set_session_cookies(response, bundle)
-            self._http.disable_cache(response)
-            return SessionResponse.from_bundle(bundle)
-
-        return router
 
     def admin_router(self, *, prefix: str = "/auth/users") -> APIRouter:
-        admin_dependency = self.require_roles(self.settings.admin_role)
-        router = APIRouter(
+        return create_admin_router(
+            self.service,
+            self._http,
+            self.require_roles(self.settings.admin_role),
             prefix=prefix,
-            tags=["authentication administration"],
-            dependencies=[Depends(admin_dependency)],
         )
-
-        @router.get("", response_model=UserListResponse)
-        async def list_users(
-            limit: Annotated[int, Query(ge=1, le=500)] = 100,
-            offset: Annotated[int, Query(ge=0)] = 0,
-        ) -> UserListResponse:
-            users = await self.service.list_users(limit=limit, offset=offset)
-            return UserListResponse(
-                items=[UserResponse.from_user(user) for user in users],
-                limit=limit,
-                offset=offset,
-            )
-
-        @router.post("", response_model=ProvisionedUserResponse, status_code=201)
-        async def create_user(
-            payload: CreateUserRequest,
-            request: Request,
-        ) -> ProvisionedUserResponse:
-            result = await self.service.create_user(
-                email=payload.email,
-                display_name=payload.display_name,
-                roles=payload.roles,
-                scopes=payload.scopes,
-                google_auto_link_allowed=payload.google_auto_link_allowed,
-                context=self._http.request_context(request),
-            )
-            return ProvisionedUserResponse.from_result(result)
-
-        @router.get("/{user_id}", response_model=UserResponse)
-        async def get_user(user_id: UUID) -> UserResponse:
-            return UserResponse.from_user(await self.service.get_user(user_id))
-
-        @router.patch("/{user_id}", response_model=UserResponse)
-        async def update_user(
-            user_id: UUID,
-            payload: UpdateUserRequest,
-            request: Request,
-        ) -> UserResponse:
-            user = await self.service.update_user(
-                user_id,
-                UserUpdate(
-                    display_name=payload.display_name,
-                    status=payload.status,
-                    roles=tuple(payload.roles) if payload.roles is not None else None,
-                    scopes=tuple(payload.scopes) if payload.scopes is not None else None,
-                    google_auto_link_allowed=payload.google_auto_link_allowed,
-                    email_link_login_enabled=payload.email_link_login_enabled,
-                ),
-                context=self._http.request_context(request),
-            )
-            return UserResponse.from_user(user)
-
-        @router.post("/{user_id}/reset-password", response_model=ProvisionedUserResponse)
-        async def reset_password(user_id: UUID, request: Request) -> ProvisionedUserResponse:
-            return ProvisionedUserResponse.from_result(
-                await self.service.reset_password(
-                    user_id,
-                    context=self._http.request_context(request),
-                )
-            )
-
-        @router.post("/{user_id}/revoke-sessions", response_model=RevocationResponse)
-        async def revoke_sessions(user_id: UUID, request: Request) -> RevocationResponse:
-            count = await self.service.revoke_user_sessions(
-                user_id,
-                context=self._http.request_context(request),
-            )
-            return RevocationResponse(revoked_sessions=count)
-
-        return router
 
     def passkey_router(self, *, prefix: str = "/auth/passkeys") -> APIRouter:
         return create_passkey_router(

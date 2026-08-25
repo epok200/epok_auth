@@ -67,12 +67,7 @@ class GoogleAccountPolicy:
             and session is not None
             and user.can_authenticate(now)
             and not user.must_change_password
-            and session.user_id == principal.user_id
-            and session.family_id == principal.family_id
-            and session.revoked_at is None
-            and session.idle_expires_at > now
-            and session.absolute_expires_at > now
-            and abs((session.authenticated_at - principal.authenticated_at).total_seconds()) <= 1
+            and session.is_valid_for(principal, now)
         )
 
     @staticmethod

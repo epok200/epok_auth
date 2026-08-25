@@ -20,6 +20,13 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def clock_now(clock: Clock) -> datetime:
+    value = clock()
+    if value.tzinfo is None:
+        raise ValueError("clock must return a timezone-aware datetime")
+    return value.astimezone(UTC)
+
+
 class AccessTokenSigner(Protocol):
     def issue(self, principal: Principal, *, now: datetime) -> tuple[str, datetime]: ...
     def verify(self, token: str) -> AccessClaims: ...

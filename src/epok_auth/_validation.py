@@ -54,18 +54,22 @@ def normalize_domain(value: str) -> str:
     return normalized
 
 
+def normalize_capability(value: str) -> str:
+    normalized = value.strip().casefold()
+    if _CAPABILITY.fullmatch(normalized) is None:
+        raise ValueError("capability syntax is not valid")
+    return normalized
+
+
 def normalize_capabilities(values: Sequence[str], *, maximum: int) -> tuple[str, ...]:
     if len(values) > maximum:
         raise AuthError(AuthErrorCode.INPUT_INVALID, "Too many capabilities.", status_code=422)
-    if any(not value.strip() for value in values):
+    try:
+        normalized = tuple(sorted({normalize_capability(value) for value in values}))
+    except ValueError as error:
         raise AuthError(
             AuthErrorCode.INPUT_INVALID, "Capability syntax is not valid.", status_code=422
-        )
-    normalized = tuple(sorted({value.strip().casefold() for value in values}))
-    if any(_CAPABILITY.fullmatch(value) is None for value in normalized):
-        raise AuthError(
-            AuthErrorCode.INPUT_INVALID, "Capability syntax is not valid.", status_code=422
-        )
+        ) from error
     return normalized
 
 

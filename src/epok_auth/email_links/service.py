@@ -1,11 +1,11 @@
 import asyncio
 import secrets
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
-from epok_auth._service_base import EMPTY_CONTEXT
+from epok_auth._events import EMPTY_CONTEXT, record_security_event
 from epok_auth._validation import normalize_email_for_login
 from epok_auth.config import AuthSettings
 from epok_auth.email_links.models import (
@@ -21,7 +21,6 @@ from epok_auth.email_links.store import EmailLinkStore, EmailLinkTransaction
 from epok_auth.errores import AuthError, AuthErrorCode
 from epok_auth.models import (
     RequestContext,
-    SecurityEvent,
     SecurityEventType,
     SessionBundle,
     UserAccount,
@@ -29,7 +28,7 @@ from epok_auth.models import (
 )
 from epok_auth.passwords import PasswordManager
 from epok_auth.sessions import SessionIssuer
-from epok_auth.tokens import AccessTokenSigner, Clock, token_hash, utc_now
+from epok_auth.tokens import AccessTokenSigner, Clock, clock_now, token_hash, utc_now
 
 
 class EmailLinkService:
@@ -86,7 +85,7 @@ class EmailLinkService:
         *,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> EmailLinkIssue:
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             user = await transaction.get_user_by_id(user_id, for_update=True)
             if user is None:
@@ -106,7 +105,7 @@ class EmailLinkService:
             )
 
     async def mark_delivered(self, link_id: UUID) -> bool:
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             candidate = await transaction.get_email_link(link_id)
             if candidate is None:
@@ -117,11 +116,10 @@ class EmailLinkService:
                 candidate.user_id,
                 candidate.purpose,
             )
-            if not self._can_activate(link, latest, user, now):
+            if link is None or not self._can_activate(link, latest, user, now):
                 if link is not None:
                     await transaction.revoke_email_link(link.id, now)
                 return False
-            assert link is not None
             activated = await transaction.activate_email_link(link.id, now)
             if activated is None:
                 return False
@@ -131,7 +129,7 @@ class EmailLinkService:
                 link.id,
                 now,
             )
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.EMAIL_LINK_DELIVERED,
                 now,
@@ -141,12 +139,12 @@ class EmailLinkService:
             return True
 
     async def mark_delivery_failed(self, link_id: UUID) -> None:
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             failed = await transaction.fail_email_link(link_id, now)
             if failed is None:
                 return
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.EMAIL_LINK_DELIVERY_FAILED,
                 now,
@@ -155,9 +153,9 @@ class EmailLinkService:
             )
 
     async def mark_notice_delivery_failed(self, user_id: UUID) -> None:
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.EMAIL_NOTICE_DELIVERY_FAILED,
                 now,
@@ -171,7 +169,7 @@ class EmailLinkService:
         *,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> SessionBundle:
-        now = self._now()
+        now = clock_now(self.clock)
         result: SessionBundle | None = None
         async with self.store.transaction() as transaction:
             link, user = await self._consumable(
@@ -181,27 +179,27 @@ class EmailLinkService:
                 now,
                 browser_nonce=browser_nonce,
             )
-            consumed = None
-            if link is not None and self._can_login(user, now):
-                consumed = await transaction.consume_email_link(link.id, link.purpose, now)
-            if consumed is None:
+            if link is None or user is None or not self._can_login(user, now):
                 await self._login_failure(transaction, user, now, context)
             else:
-                assert user is not None
-                result = await self.session_issuer.issue(
-                    transaction,
-                    user,
-                    now=now,
-                    context=context,
-                )
-                await self._event(
-                    transaction,
-                    SecurityEventType.EMAIL_LINK_LOGIN_SUCCEEDED,
-                    now,
-                    user_id=user.id,
-                    session_id=result.principal.session_id,
-                    context=context,
-                )
+                consumed = await transaction.consume_email_link(link.id, link.purpose, now)
+                if consumed is None:
+                    await self._login_failure(transaction, user, now, context)
+                else:
+                    result = await self.session_issuer.issue(
+                        transaction,
+                        user,
+                        now=now,
+                        context=context,
+                    )
+                    await record_security_event(
+                        transaction,
+                        SecurityEventType.EMAIL_LINK_LOGIN_SUCCEEDED,
+                        now,
+                        user_id=user.id,
+                        session_id=result.principal.session_id,
+                        context=context,
+                    )
         if result is None:
             raise _invalid_email_link()
         return result
@@ -214,7 +212,7 @@ class EmailLinkService:
         context: RequestContext = EMPTY_CONTEXT,
     ) -> AuthEmail:
         self.passwords.validate(new_password)
-        now = self._now()
+        now = clock_now(self.clock)
         if not await self._active_link_exists(token, EmailLinkPurpose.PASSWORD_RESET, now):
             raise _invalid_email_link()
         password_hash = await asyncio.to_thread(self.passwords.hash, new_password)
@@ -226,37 +224,24 @@ class EmailLinkService:
                 EmailLinkPurpose.PASSWORD_RESET,
                 now,
             )
-            consumed = None
-            if link is not None and self._can_reset_password(user):
+            if link is not None and user is not None and self._can_reset_password(user):
                 consumed = await transaction.consume_email_link(link.id, link.purpose, now)
-            if consumed is not None:
-                assert user is not None
-                updated = replace(
-                    user,
-                    password_hash=password_hash,
-                    must_change_password=False,
-                    password_login_enabled=True,
-                    google_auto_link_allowed=False,
-                    failed_login_attempts=0,
-                    locked_until=None,
-                    security_version=user.security_version + 1,
-                    password_changed_at=now,
-                    updated_at=now,
-                )
-                await transaction.update_user(updated)
-                await transaction.revoke_user_sessions(user.id, revoked_at=now)
-                await self._event(
-                    transaction,
-                    SecurityEventType.PASSWORD_RECOVERY_COMPLETED,
-                    now,
-                    user_id=user.id,
-                    context=context,
-                )
-                notice = AuthEmail(
-                    recipient=user.email,
-                    kind=AuthEmailKind.PASSWORD_CHANGED,
-                    user_id=user.id,
-                )
+                if consumed is not None:
+                    updated = user.activate_password(password_hash, now)
+                    await transaction.update_user(updated)
+                    await transaction.revoke_user_sessions(user.id, revoked_at=now)
+                    await record_security_event(
+                        transaction,
+                        SecurityEventType.PASSWORD_RECOVERY_COMPLETED,
+                        now,
+                        user_id=user.id,
+                        context=context,
+                    )
+                    notice = AuthEmail(
+                        recipient=user.email,
+                        kind=AuthEmailKind.PASSWORD_CHANGED,
+                        user_id=user.id,
+                    )
         if notice is None:
             raise _invalid_email_link()
         return notice
@@ -267,7 +252,7 @@ class EmailLinkService:
         *,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> UserAccount:
-        now = self._now()
+        now = clock_now(self.clock)
         if not await self._active_link_exists(token, EmailLinkPurpose.INVITATION, now):
             raise _invalid_email_link()
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
@@ -280,33 +265,19 @@ class EmailLinkService:
                 EmailLinkPurpose.INVITATION,
                 now,
             )
-            consumed = None
-            if link is not None and self._can_invite(user):
+            if link is not None and user is not None and self._can_invite(user):
                 consumed = await transaction.consume_email_link(link.id, link.purpose, now)
-            if consumed is not None:
-                assert user is not None
-                result = replace(
-                    user,
-                    password_hash=password_hash,
-                    must_change_password=False,
-                    password_login_enabled=False,
-                    email_link_login_enabled=True,
-                    google_auto_link_allowed=False,
-                    failed_login_attempts=0,
-                    locked_until=None,
-                    security_version=user.security_version + 1,
-                    password_changed_at=now,
-                    updated_at=now,
-                )
-                await transaction.update_user(result)
-                await transaction.revoke_user_sessions(user.id, revoked_at=now)
-                await self._event(
-                    transaction,
-                    SecurityEventType.INVITATION_ACTIVATED,
-                    now,
-                    user_id=user.id,
-                    context=context,
-                )
+                if consumed is not None:
+                    result = user.activate_email_link_login(password_hash, now)
+                    await transaction.update_user(result)
+                    await transaction.revoke_user_sessions(user.id, revoked_at=now)
+                    await record_security_event(
+                        transaction,
+                        SecurityEventType.INVITATION_ACTIVATED,
+                        now,
+                        user_id=user.id,
+                        context=context,
+                    )
         if result is None:
             raise _invalid_email_link()
         return result
@@ -319,13 +290,12 @@ class EmailLinkService:
         browser_nonce: str | None,
         context: RequestContext,
     ) -> EmailLinkIssue:
-        now = self._now()
+        now = clock_now(self.clock)
         normalized_email = normalize_email_for_login(email)
         async with self.store.transaction() as transaction:
             user = await transaction.get_user_by_email(normalized_email, for_update=True)
-            if not self._can_request(user, purpose, now):
+            if user is None or not self._can_request(user, purpose, now):
                 return EmailLinkIssue()
-            assert user is not None
             return await self._issue(
                 transaction,
                 user,
@@ -372,7 +342,7 @@ class EmailLinkService:
             expires_at=now + timedelta(seconds=self._ttl(purpose)),
         )
         await transaction.insert_email_link(link)
-        await self._event(
+        await record_security_event(
             transaction,
             SecurityEventType.EMAIL_LINK_ISSUED,
             now,
@@ -463,11 +433,11 @@ class EmailLinkService:
 
     def _can_request(
         self,
-        user: UserAccount | None,
+        user: UserAccount,
         purpose: EmailLinkPurpose,
         now: datetime,
     ) -> bool:
-        if user is None or self.settings.admin_role in user.roles:
+        if self.settings.admin_role in user.roles:
             return False
         if purpose is EmailLinkPurpose.LOGIN:
             return self._can_login(user, now)
@@ -476,21 +446,20 @@ class EmailLinkService:
         return self._can_invite(user)
 
     @staticmethod
-    def _can_login(user: UserAccount | None, now: datetime) -> bool:
+    def _can_login(user: UserAccount, now: datetime) -> bool:
         return (
-            user is not None
-            and user.can_authenticate(now)
+            user.can_authenticate(now)
             and user.email_link_login_enabled
             and not user.must_change_password
         )
 
     @staticmethod
-    def _can_reset_password(user: UserAccount | None) -> bool:
-        return user is not None and user.status is UserStatus.ACTIVE and user.password_login_enabled
+    def _can_reset_password(user: UserAccount) -> bool:
+        return user.status is UserStatus.ACTIVE and user.password_login_enabled
 
     @staticmethod
-    def _can_invite(user: UserAccount | None) -> bool:
-        return user is not None and user.status is UserStatus.ACTIVE and user.must_change_password
+    def _can_invite(user: UserAccount) -> bool:
+        return user.status is UserStatus.ACTIVE and user.must_change_password
 
     async def _login_failure(
         self,
@@ -499,34 +468,12 @@ class EmailLinkService:
         now: datetime,
         context: RequestContext,
     ) -> None:
-        await self._event(
+        await record_security_event(
             transaction,
             SecurityEventType.EMAIL_LINK_LOGIN_FAILED,
             now,
             user_id=user.id if user is not None else None,
             context=context,
-        )
-
-    async def _event(
-        self,
-        transaction: EmailLinkTransaction,
-        event_type: SecurityEventType,
-        now: datetime,
-        *,
-        user_id: UUID | None = None,
-        session_id: UUID | None = None,
-        context: RequestContext = EMPTY_CONTEXT,
-        metadata: dict[str, str | int | bool | None] | None = None,
-    ) -> None:
-        await transaction.add_security_event(
-            SecurityEvent.from_request(
-                event_type,
-                now,
-                context=context,
-                user_id=user_id,
-                session_id=session_id,
-                metadata=metadata,
-            )
         )
 
     def _frontend_url(self, purpose: EmailLinkPurpose) -> str:
@@ -546,12 +493,6 @@ class EmailLinkService:
         if purpose is EmailLinkPurpose.PASSWORD_RESET:
             return self.settings.email_link_password_reset_ttl_seconds
         return self.settings.email_link_invitation_ttl_seconds
-
-    def _now(self) -> datetime:
-        value = self.clock()
-        if value.tzinfo is None:
-            raise ValueError("clock must return a timezone-aware datetime")
-        return value.astimezone(UTC)
 
 
 def _require_frontend_urls(settings: AuthSettings) -> None:

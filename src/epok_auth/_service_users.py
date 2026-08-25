@@ -4,7 +4,8 @@ from collections.abc import Sequence
 from dataclasses import replace
 from uuid import UUID, uuid4
 
-from epok_auth._service_base import EMPTY_CONTEXT, AuthServiceBase
+from epok_auth._events import EMPTY_CONTEXT, record_security_event
+from epok_auth._service_base import AuthServiceBase
 from epok_auth._validation import normalize_capabilities, normalize_display_name, normalize_email
 from epok_auth.errores import AuthError, AuthErrorCode
 from epok_auth.models import (
@@ -16,6 +17,7 @@ from epok_auth.models import (
     UserUpdate,
 )
 from epok_auth.store import StoreConflictError
+from epok_auth.tokens import clock_now
 
 
 class UserServiceMethods(AuthServiceBase):
@@ -27,7 +29,7 @@ class UserServiceMethods(AuthServiceBase):
         password: str,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> UserAccount:
-        now = self._now()
+        now = clock_now(self.clock)
         normalized_email = normalize_email(email)
         normalized_name = normalize_display_name(display_name)
         password_hash = await asyncio.to_thread(self.passwords.hash, password)
@@ -56,7 +58,7 @@ class UserServiceMethods(AuthServiceBase):
                         status_code=409,
                     )
                 await transaction.insert_user(user)
-                await self._event(
+                await record_security_event(
                     transaction,
                     SecurityEventType.ADMIN_CREATED,
                     now=now,
@@ -81,7 +83,7 @@ class UserServiceMethods(AuthServiceBase):
         google_auto_link_allowed: bool = False,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> ProvisionedUser:
-        now = self._now()
+        now = clock_now(self.clock)
         normalized_roles = normalize_capabilities(
             roles if roles is not None else (self.settings.default_user_role,),
             maximum=self.settings.max_roles,
@@ -105,7 +107,7 @@ class UserServiceMethods(AuthServiceBase):
         try:
             async with self.store.transaction() as transaction:
                 await transaction.insert_user(user)
-                await self._event(
+                await record_security_event(
                     transaction,
                     SecurityEventType.USER_CREATED,
                     now=now,
@@ -140,7 +142,7 @@ class UserServiceMethods(AuthServiceBase):
         *,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> UserAccount:
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             await transaction.acquire_admin_invariant_lock()
             current = await transaction.get_user_by_id(user_id, for_update=True)
@@ -197,7 +199,6 @@ class UserServiceMethods(AuthServiceBase):
                 or google_auto_link_allowed != current.google_auto_link_allowed
                 or email_link_login_enabled != current.email_link_login_enabled
             )
-            security_version = current.security_version + int(security_changed)
             updated = replace(
                 current,
                 display_name=display_name,
@@ -206,9 +207,10 @@ class UserServiceMethods(AuthServiceBase):
                 scopes=scopes,
                 google_auto_link_allowed=google_auto_link_allowed,
                 email_link_login_enabled=email_link_login_enabled,
-                security_version=security_version,
                 updated_at=now,
             )
+            if security_changed:
+                updated = updated.advance_security_version(now)
             await transaction.update_user(updated)
             event_type = SecurityEventType.USER_UPDATED
             if current.status is not status:
@@ -219,7 +221,7 @@ class UserServiceMethods(AuthServiceBase):
                 )
             if status is UserStatus.DISABLED:
                 await transaction.revoke_user_sessions(user_id, revoked_at=now)
-            await self._event(
+            await record_security_event(
                 transaction,
                 event_type,
                 now=now,
@@ -234,28 +236,17 @@ class UserServiceMethods(AuthServiceBase):
         *,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> ProvisionedUser:
-        now = self._now()
+        now = clock_now(self.clock)
         temporary_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
         password_hash = await asyncio.to_thread(self.passwords.hash, temporary_password)
         async with self.store.transaction() as transaction:
             current = await transaction.get_user_by_id(user_id, for_update=True)
             if current is None:
                 raise AuthError(AuthErrorCode.USER_NOT_FOUND, "User not found.", status_code=404)
-            updated = replace(
-                current,
-                password_hash=password_hash,
-                must_change_password=True,
-                password_login_enabled=True,
-                google_auto_link_allowed=False,
-                failed_login_attempts=0,
-                locked_until=None,
-                security_version=current.security_version + 1,
-                password_changed_at=now,
-                updated_at=now,
-            )
+            updated = current.require_password_change(password_hash, now)
             await transaction.update_user(updated)
             await transaction.revoke_user_sessions(user_id, revoked_at=now)
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.PASSWORD_RESET,
                 now=now,
@@ -270,12 +261,12 @@ class UserServiceMethods(AuthServiceBase):
         *,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> int:
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             if await transaction.get_user_by_id(user_id) is None:
                 raise AuthError(AuthErrorCode.USER_NOT_FOUND, "User not found.", status_code=404)
             count = await transaction.revoke_user_sessions(user_id, revoked_at=now)
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.SESSIONS_REVOKED,
                 now=now,
