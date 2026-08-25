@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- centralize account credential transitions and refresh-session validity in domain models;
+- unify clock normalization, security-event recording and capability syntax validation;
+- replace runtime assertions with explicit guards and simplify passkey authentication branches;
+- split local FastAPI routers and security configuration rules without changing the public API.
+
 ## 0.4.0 - 2026-08-24
 
 - add opt-in Magic Link login bound to the requesting browser;

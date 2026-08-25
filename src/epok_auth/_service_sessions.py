@@ -2,7 +2,8 @@ import asyncio
 from dataclasses import replace
 from datetime import timedelta
 
-from epok_auth._service_base import EMPTY_CONTEXT, AuthServiceBase
+from epok_auth._events import EMPTY_CONTEXT, record_security_event
+from epok_auth._service_base import AuthServiceBase
 from epok_auth._validation import (
     canonical_origin,
     normalize_capabilities,
@@ -24,7 +25,7 @@ from epok_auth.models import (
     UserStatus,
 )
 from epok_auth.sessions import principal_from_session
-from epok_auth.tokens import secure_token_equals, token_hash
+from epok_auth.tokens import clock_now, secure_token_equals, token_hash
 
 
 class SessionServiceMethods(AuthServiceBase):
@@ -35,7 +36,7 @@ class SessionServiceMethods(AuthServiceBase):
         *,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> SessionBundle:
-        now = self._now()
+        now = clock_now(self.clock)
         normalized_email = normalize_email_for_login(email)
         failure: AuthError | None = None
         result: SessionBundle | None = None
@@ -66,24 +67,21 @@ class SessionServiceMethods(AuthServiceBase):
                         user,
                         failed_login_attempts=attempts,
                         locked_until=locked_until,
-                        security_version=(
-                            user.security_version + 1
-                            if locked_until is not None
-                            else user.security_version
-                        ),
                         updated_at=now,
                     )
+                    if locked_until is not None:
+                        user = user.advance_security_version(now)
                     await transaction.update_user(user)
                     if locked_until is not None:
                         await transaction.revoke_user_sessions(user.id, revoked_at=now)
-                        await self._event(
+                        await record_security_event(
                             transaction,
                             SecurityEventType.ACCOUNT_LOCKED,
                             now=now,
                             user_id=user.id,
                             context=context,
                         )
-                await self._event(
+                await record_security_event(
                     transaction,
                     SecurityEventType.LOGIN_FAILED,
                     now=now,
@@ -92,7 +90,8 @@ class SessionServiceMethods(AuthServiceBase):
                 )
                 failure = invalid_credentials()
             else:
-                assert user is not None
+                if user is None:
+                    raise invalid_credentials()
                 updated_hash = verification.updated_hash or user.password_hash
                 user = replace(
                     user,
@@ -108,7 +107,7 @@ class SessionServiceMethods(AuthServiceBase):
                     now=now,
                     context=context,
                 )
-                await self._event(
+                await record_security_event(
                     transaction,
                     SecurityEventType.LOGIN_SUCCEEDED,
                     now=now,
@@ -124,7 +123,7 @@ class SessionServiceMethods(AuthServiceBase):
 
     async def authenticate(self, access_token: str) -> Principal:
         claims = self.signer.verify(access_token)
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             user = await transaction.get_user_by_id(claims.user_id)
             session = await transaction.get_session_by_id(claims.session_id)
@@ -132,12 +131,7 @@ class SessionServiceMethods(AuthServiceBase):
             user is None
             or session is None
             or not user.can_authenticate(now)
-            or session.user_id != user.id
-            or session.family_id != claims.family_id
-            or session.revoked_at is not None
-            or session.idle_expires_at <= now
-            or session.absolute_expires_at <= now
-            or abs((session.authenticated_at - claims.authenticated_at).total_seconds()) > 1
+            or not session.is_valid_for(claims, now)
         ):
             raise invalid_session()
         return principal_from_session(user, session)
@@ -153,7 +147,7 @@ class SessionServiceMethods(AuthServiceBase):
     ) -> SessionBundle:
         self.validate_origin(origin)
         self.validate_csrf_pair(csrf_cookie, csrf_header)
-        now = self._now()
+        now = clock_now(self.clock)
         failure: AuthError | None = None
         result: SessionBundle | None = None
         refresh_hash = token_hash(refresh_token)
@@ -172,7 +166,7 @@ class SessionServiceMethods(AuthServiceBase):
                     failure = invalid_session()
                 elif session.used_at is not None:
                     await transaction.revoke_family(session.family_id, revoked_at=now)
-                    await self._event(
+                    await record_security_event(
                         transaction,
                         SecurityEventType.REFRESH_REUSE_DETECTED,
                         now=now,
@@ -206,7 +200,7 @@ class SessionServiceMethods(AuthServiceBase):
                             replaced_by_id=result.principal.session_id,
                         )
                     )
-                    await self._event(
+                    await record_security_event(
                         transaction,
                         SecurityEventType.REFRESH_ROTATED,
                         now=now,
@@ -233,7 +227,7 @@ class SessionServiceMethods(AuthServiceBase):
         if not refresh_token:
             return 0
         self.validate_csrf_pair(csrf_cookie or "", csrf_header or "")
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             session = await transaction.get_session_by_token_hash(
                 token_hash(refresh_token),
@@ -244,7 +238,7 @@ class SessionServiceMethods(AuthServiceBase):
             if not secure_token_equals(session.csrf_hash, token_hash(csrf_cookie or "")):
                 raise invalid_csrf()
             count = await transaction.revoke_family(session.family_id, revoked_at=now)
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.LOGOUT,
                 now=now,
@@ -263,7 +257,7 @@ class SessionServiceMethods(AuthServiceBase):
         context: RequestContext = EMPTY_CONTEXT,
     ) -> SessionBundle:
         self.passwords.validate(new_password)
-        now = self._now()
+        now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
             user = await transaction.get_user_by_id(principal.user_id, for_update=True)
             session = await transaction.get_session_by_id(principal.session_id, for_update=True)
@@ -271,12 +265,7 @@ class SessionServiceMethods(AuthServiceBase):
                 user is None
                 or session is None
                 or user.status is not UserStatus.ACTIVE
-                or session.user_id != user.id
-                or session.family_id != principal.family_id
-                or abs((session.authenticated_at - principal.authenticated_at).total_seconds()) > 1
-                or session.revoked_at is not None
-                or session.idle_expires_at <= now
-                or session.absolute_expires_at <= now
+                or not session.is_valid_for(principal, now)
             ):
                 raise invalid_session()
             verification = await asyncio.to_thread(
@@ -298,18 +287,7 @@ class SessionServiceMethods(AuthServiceBase):
                     status_code=422,
                 )
             password_hash = await asyncio.to_thread(self.passwords.hash, new_password)
-            user = replace(
-                user,
-                password_hash=password_hash,
-                must_change_password=False,
-                password_login_enabled=True,
-                google_auto_link_allowed=False,
-                failed_login_attempts=0,
-                locked_until=None,
-                security_version=user.security_version + 1,
-                password_changed_at=now,
-                updated_at=now,
-            )
+            user = user.activate_password(password_hash, now)
             await transaction.update_user(user)
             await transaction.revoke_user_sessions(user.id, revoked_at=now)
             result = await self.session_issuer.issue(
@@ -318,7 +296,7 @@ class SessionServiceMethods(AuthServiceBase):
                 now=now,
                 context=context,
             )
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.PASSWORD_CHANGED,
                 now=now,
@@ -354,7 +332,7 @@ class SessionServiceMethods(AuthServiceBase):
     def require_recent_authentication(self, principal: Principal, *, max_age_seconds: int) -> None:
         if max_age_seconds < 0:
             raise ValueError("max_age_seconds must be non-negative")
-        if self._now() - principal.authenticated_at > timedelta(seconds=max_age_seconds):
+        if clock_now(self.clock) - principal.authenticated_at > timedelta(seconds=max_age_seconds):
             raise AuthError(
                 AuthErrorCode.FORBIDDEN,
                 "Recent authentication is required.",

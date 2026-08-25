@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from typing import Self
@@ -79,6 +79,50 @@ class UserAccount:
             self.locked_until and self.locked_until > now
         )
 
+    def advance_security_version(self, at: datetime) -> Self:
+        return replace(
+            self,
+            security_version=self.security_version + 1,
+            updated_at=at,
+        )
+
+    def require_password_change(self, password_hash: str, at: datetime) -> Self:
+        return replace(
+            self._replace_password(password_hash, at),
+            must_change_password=True,
+            password_login_enabled=True,
+        )
+
+    def activate_password(self, password_hash: str, at: datetime) -> Self:
+        return replace(
+            self._replace_password(password_hash, at),
+            must_change_password=False,
+            password_login_enabled=True,
+        )
+
+    def disable_password(self, password_hash: str, at: datetime) -> Self:
+        return replace(
+            self._replace_password(password_hash, at),
+            must_change_password=False,
+            password_login_enabled=False,
+        )
+
+    def activate_email_link_login(self, password_hash: str, at: datetime) -> Self:
+        return replace(
+            self.disable_password(password_hash, at),
+            email_link_login_enabled=True,
+        )
+
+    def _replace_password(self, password_hash: str, at: datetime) -> Self:
+        return replace(
+            self.advance_security_version(at),
+            password_hash=password_hash,
+            google_auto_link_allowed=False,
+            failed_login_attempts=0,
+            locked_until=None,
+            password_changed_at=at,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Principal:
@@ -100,6 +144,17 @@ class Principal:
 
 
 @dataclass(frozen=True, slots=True)
+class AccessClaims:
+    user_id: UUID
+    session_id: UUID
+    family_id: UUID
+    issued_at: datetime
+    expires_at: datetime
+    token_id: str
+    authenticated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class RefreshSession:
     id: UUID
     user_id: UUID
@@ -114,6 +169,25 @@ class RefreshSession:
     revoked_at: datetime | None = None
     replaced_by_id: UUID | None = None
 
+    def is_active(self, now: datetime) -> bool:
+        return (
+            self.revoked_at is None
+            and self.idle_expires_at > now
+            and self.absolute_expires_at > now
+        )
+
+    def is_valid_for(self, subject: Principal | AccessClaims, now: datetime) -> bool:
+        authentication_matches = (
+            abs((self.authenticated_at - subject.authenticated_at).total_seconds()) <= 1
+        )
+        return (
+            self.is_active(now)
+            and self.id == subject.session_id
+            and self.user_id == subject.user_id
+            and self.family_id == subject.family_id
+            and authentication_matches
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SessionBundle:
@@ -124,17 +198,6 @@ class SessionBundle:
     refresh_idle_expires_at: datetime
     refresh_absolute_expires_at: datetime
     principal: Principal
-
-
-@dataclass(frozen=True, slots=True)
-class AccessClaims:
-    user_id: UUID
-    session_id: UUID
-    family_id: UUID
-    issued_at: datetime
-    expires_at: datetime
-    token_id: str
-    authenticated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

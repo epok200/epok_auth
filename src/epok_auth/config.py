@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from epok_auth._validation import canonical_origin, normalize_domain
+from epok_auth._validation import canonical_origin, normalize_capability, normalize_domain
 
 
 class Environment(StrEnum):
@@ -33,7 +33,6 @@ _UNSAFE_SECRETS = frozenset(
     }
 )
 _HTTP_TOKEN = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
-_CAPABILITY = re.compile(r"[a-z0-9][a-z0-9:._-]{0,99}")
 
 
 class AuthSettings(BaseSettings):
@@ -128,10 +127,10 @@ class AuthSettings(BaseSettings):
     @field_validator("admin_role", "default_user_role")
     @classmethod
     def validate_capability(cls, value: str) -> str:
-        normalized = value.strip().casefold()
-        if _CAPABILITY.fullmatch(normalized) is None:
-            raise ValueError("roles must use lowercase capability syntax")
-        return normalized
+        try:
+            return normalize_capability(value)
+        except ValueError as error:
+            raise ValueError("roles must use lowercase capability syntax") from error
 
     @field_validator("cookie_path")
     @classmethod
@@ -284,6 +283,15 @@ class AuthSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_security_invariants(self) -> Self:
+        self._validate_secret()
+        self._validate_lifetimes()
+        self._validate_email_links()
+        self._validate_google_mode()
+        self._validate_cookie_policy()
+        self._validate_production()
+        return self
+
+    def _validate_secret(self) -> None:
         secret = self.jwt_secret.get_secret_value()
         stripped_secret = secret.strip()
         if secret != stripped_secret or any(ord(character) < 32 for character in secret):
@@ -292,12 +300,16 @@ class AuthSettings(BaseSettings):
             raise ValueError("jwt_secret must contain at least 32 bytes")
         if secret.casefold() in _UNSAFE_SECRETS or len(set(secret)) < 8:
             raise ValueError("jwt_secret is a weak or public example value")
+
+    def _validate_lifetimes(self) -> None:
         if self.access_ttl_seconds >= self.refresh_idle_ttl_seconds:
             raise ValueError("access TTL must be shorter than refresh idle TTL")
         if self.refresh_idle_ttl_seconds > self.refresh_absolute_ttl_seconds:
             raise ValueError("refresh idle TTL cannot exceed the absolute session TTL")
         if self.password_min_length > self.password_max_length:
             raise ValueError("password_min_length cannot exceed password_max_length")
+
+    def _validate_email_links(self) -> None:
         email_link_urls = (
             self.email_link_login_url,
             self.email_link_password_reset_url,
@@ -320,11 +332,15 @@ class AuthSettings(BaseSettings):
         )
         if self.email_link_retention_seconds < minimum_retention:
             raise ValueError("email link retention must cover every TTL and rate-limit window")
+
+    def _validate_google_mode(self) -> None:
         if (
             self.google_account_mode is GoogleAccountMode.OPEN
             and self.default_user_role == self.admin_role
         ):
             raise ValueError("open Google accounts cannot receive the administrative role")
+
+    def _validate_cookie_policy(self) -> None:
         if (
             len(
                 {
@@ -343,20 +359,22 @@ class AuthSettings(BaseSettings):
                 raise ValueError("__Host- cookies cannot set Domain")
             if self.cookie_path != "/":
                 raise ValueError("__Host- cookies require Path=/")
-        if self.environment is Environment.PRODUCTION:
-            if self.database_url is None:
-                raise ValueError("production requires database_url")
-            if self.issuer == "epok-auth" or self.audience == "epok-auth-api":
-                raise ValueError("production requires application-specific issuer and audience")
-            if not self.secure_cookies:
-                raise ValueError("production requires secure cookies")
-            if not self.cookie_use_host_prefix:
-                raise ValueError("production requires __Host- cookie names")
-            if not self.require_origin or not self.trusted_origins:
-                raise ValueError("production requires explicit Origin validation")
-            if self.password_min_length < 15:
-                raise ValueError("production password minimum must be at least 15 characters")
-        return self
+
+    def _validate_production(self) -> None:
+        if self.environment is not Environment.PRODUCTION:
+            return
+        if self.database_url is None:
+            raise ValueError("production requires database_url")
+        if self.issuer == "epok-auth" or self.audience == "epok-auth-api":
+            raise ValueError("production requires application-specific issuer and audience")
+        if not self.secure_cookies:
+            raise ValueError("production requires secure cookies")
+        if not self.cookie_use_host_prefix:
+            raise ValueError("production requires __Host- cookie names")
+        if not self.require_origin or not self.trusted_origins:
+            raise ValueError("production requires explicit Origin validation")
+        if self.password_min_length < 15:
+            raise ValueError("production password minimum must be at least 15 characters")
 
     @property
     def effective_refresh_cookie_name(self) -> str:

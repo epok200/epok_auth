@@ -1,5 +1,5 @@
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 from epok_auth._validation import canonical_origin
@@ -11,7 +11,7 @@ from epok_auth.google.models import (
     GoogleOptions,
 )
 from epok_auth.google.store import GoogleStore
-from epok_auth.tokens import Clock
+from epok_auth.tokens import Clock, clock_now
 
 
 class GoogleChallengeService:
@@ -29,7 +29,7 @@ class GoogleChallengeService:
         *,
         user_id: UUID | None = None,
     ) -> GoogleOptions:
-        now = self._now()
+        now = clock_now(self.clock)
         challenge = GoogleChallenge(
             id=uuid4(),
             purpose=purpose,
@@ -61,7 +61,7 @@ class GoogleChallengeService:
         *,
         user_id: UUID | None = None,
     ) -> GoogleChallenge:
-        now = self._now()
+        now = clock_now(self.clock)
         expected_origin = self._validate_origin(origin)
         async with self.store.transaction() as transaction:
             challenge = await transaction.consume_google_challenge(
@@ -94,9 +94,3 @@ class GoogleChallengeService:
         if client_id is None:  # pragma: no cover
             raise RuntimeError("Google Sign-In was not configured")
         return client_id
-
-    def _now(self) -> datetime:
-        value = self.clock()
-        if value.tzinfo is None:
-            raise ValueError("clock must return a timezone-aware datetime")
-        return value.astimezone(UTC)

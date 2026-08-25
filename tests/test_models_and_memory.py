@@ -84,6 +84,82 @@ def test_user_authentication_policy_is_owned_by_the_user_model() -> None:
     assert replace(account, locked_until=NOW).can_authenticate(NOW)
 
 
+def test_user_security_version_advances_immutably() -> None:
+    account = user()
+    changed_at = NOW + timedelta(minutes=1)
+
+    updated = account.advance_security_version(changed_at)
+
+    assert account.security_version == 0
+    assert updated.security_version == 1
+    assert updated.updated_at == changed_at
+
+
+@pytest.mark.parametrize(
+    ("transition", "must_change_password", "password_login_enabled", "email_link_login_enabled"),
+    [
+        ("require_password_change", True, True, False),
+        ("activate_password", False, True, False),
+        ("disable_password", False, False, False),
+        ("activate_email_link_login", False, False, True),
+    ],
+)
+def test_user_password_transitions_reset_credential_state(
+    transition: str,
+    must_change_password: bool,
+    password_login_enabled: bool,
+    email_link_login_enabled: bool,
+) -> None:
+    account = replace(
+        user(),
+        google_auto_link_allowed=True,
+        failed_login_attempts=4,
+        locked_until=NOW + timedelta(minutes=5),
+    )
+    changed_at = NOW + timedelta(minutes=1)
+
+    updated = getattr(account, transition)("new-hash", changed_at)
+
+    assert updated.password_hash == "new-hash"
+    assert updated.must_change_password is must_change_password
+    assert updated.password_login_enabled is password_login_enabled
+    assert updated.email_link_login_enabled is email_link_login_enabled
+    assert updated.google_auto_link_allowed is False
+    assert updated.failed_login_attempts == 0
+    assert updated.locked_until is None
+    assert updated.security_version == account.security_version + 1
+    assert updated.password_changed_at == changed_at
+    assert updated.updated_at == changed_at
+
+
+def test_refresh_session_owns_subject_and_expiry_validation() -> None:
+    account = user()
+    credential = session(account)
+    principal = Principal(
+        user_id=account.id,
+        session_id=credential.id,
+        family_id=credential.family_id,
+        email=account.email,
+        display_name=account.display_name,
+        roles=(),
+        scopes=(),
+        must_change_password=False,
+        authenticated_at=NOW,
+    )
+
+    assert credential.is_active(NOW)
+    assert credential.is_valid_for(principal, NOW)
+    assert not replace(credential, revoked_at=NOW).is_valid_for(principal, NOW)
+    assert not replace(credential, idle_expires_at=NOW).is_valid_for(principal, NOW)
+    assert not replace(credential, absolute_expires_at=NOW).is_valid_for(principal, NOW)
+    assert not credential.is_valid_for(replace(principal, session_id=uuid4()), NOW)
+    assert not credential.is_valid_for(replace(principal, family_id=uuid4()), NOW)
+    assert not credential.is_valid_for(
+        replace(principal, authenticated_at=NOW + timedelta(seconds=2)),
+        NOW,
+    )
+
+
 def test_security_event_factory_bounds_untrusted_request_metadata() -> None:
     metadata = {"reason": "invalid"}
     event = SecurityEvent.from_request(

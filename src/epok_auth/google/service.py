@@ -1,9 +1,10 @@
 import asyncio
 import secrets
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
+from epok_auth._events import EMPTY_CONTEXT, record_security_event
 from epok_auth.config import AuthSettings, GoogleAccountMode
 from epok_auth.errores import (
     AuthError,
@@ -33,7 +34,6 @@ from epok_auth.models import (
     Principal,
     ProvisionedUser,
     RequestContext,
-    SecurityEvent,
     SecurityEventType,
     SecurityMetadata,
     SessionBundle,
@@ -42,9 +42,7 @@ from epok_auth.models import (
 from epok_auth.passwords import PasswordManager
 from epok_auth.sessions import SessionIssuer
 from epok_auth.store import StoreConflictError
-from epok_auth.tokens import AccessTokenSigner, Clock, utc_now
-
-_EMPTY_CONTEXT = RequestContext()
+from epok_auth.tokens import AccessTokenSigner, Clock, clock_now, utc_now
 
 
 class GoogleLoginService:
@@ -81,9 +79,9 @@ class GoogleLoginService:
         credential: str,
         origin: str | None,
         *,
-        context: RequestContext = _EMPTY_CONTEXT,
+        context: RequestContext = EMPTY_CONTEXT,
     ) -> SessionBundle:
-        now = self._now()
+        now = clock_now(self.clock)
         challenge = await self.challenges.consume(
             challenge_id,
             GoogleChallengePurpose.LOGIN,
@@ -110,10 +108,10 @@ class GoogleLoginService:
         credential: str,
         origin: str | None,
         *,
-        context: RequestContext = _EMPTY_CONTEXT,
+        context: RequestContext = EMPTY_CONTEXT,
     ) -> ExternalIdentity:
         self._require_recent_authentication(principal)
-        now = self._now()
+        now = clock_now(self.clock)
         challenge = await self.challenges.consume(
             challenge_id,
             GoogleChallengePurpose.LINK,
@@ -130,9 +128,9 @@ class GoogleLoginService:
         self,
         user_id: UUID,
         *,
-        context: RequestContext = _EMPTY_CONTEXT,
+        context: RequestContext = EMPTY_CONTEXT,
     ) -> ProvisionedUser:
-        now = self._now()
+        now = clock_now(self.clock)
         temporary_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
         password_hash = await asyncio.to_thread(self.passwords.hash, temporary_password)
         async with self.store.transaction() as transaction:
@@ -149,22 +147,11 @@ class GoogleLoginService:
                     AuthErrorCode.GOOGLE_IDENTITY_NOT_FOUND,
                     "Google identity not found.",
                 )
-            recovered = replace(
-                user,
-                password_hash=password_hash,
-                must_change_password=True,
-                password_login_enabled=True,
-                google_auto_link_allowed=False,
-                failed_login_attempts=0,
-                locked_until=None,
-                security_version=user.security_version + 1,
-                password_changed_at=now,
-                updated_at=now,
-            )
+            recovered = user.require_password_change(password_hash, now)
             await transaction.update_user(recovered)
             await transaction.delete_external_identity(identity.id)
             await transaction.revoke_user_sessions(user_id, revoked_at=now)
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.GOOGLE_RECOVERY_COMPLETED,
                 now,
@@ -222,7 +209,7 @@ class GoogleLoginService:
                 result = await self._login_unlinked(transaction, claims, now, context)
             if result is None:
                 failure = True
-                await self._event(
+                await record_security_event(
                     transaction,
                     SecurityEventType.GOOGLE_LOGIN_FAILED,
                     now,
@@ -272,7 +259,7 @@ class GoogleLoginService:
             now=now,
             context=context,
         )
-        await self._event(
+        await record_security_event(
             transaction,
             SecurityEventType.GOOGLE_LOGIN_SUCCEEDED,
             now,
@@ -308,9 +295,8 @@ class GoogleLoginService:
         if not self.policy.is_authoritative(claims) or claims.email is None:
             return None
         user = await transaction.get_user_by_email(claims.email, for_update=True)
-        if not self.policy.can_auto_link(user, claims, now):
+        if user is None or not self.policy.can_auto_link(user, claims, now):
             return None
-        assert user is not None
         return await self._link_and_login(transaction, user, claims, now, context)
 
     async def _login_open(
@@ -340,18 +326,7 @@ class GoogleLoginService:
     ) -> SessionBundle:
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
         password_hash = await asyncio.to_thread(self.passwords.hash, unusable_password)
-        linked_user = replace(
-            user,
-            password_hash=password_hash,
-            must_change_password=False,
-            password_login_enabled=False,
-            google_auto_link_allowed=False,
-            failed_login_attempts=0,
-            locked_until=None,
-            security_version=user.security_version + 1,
-            password_changed_at=now,
-            updated_at=now,
-        )
+        linked_user = user.disable_password(password_hash, now)
         await transaction.update_user(linked_user)
         return await self._insert_identity_and_login(
             transaction,
@@ -368,12 +343,14 @@ class GoogleLoginService:
         now: datetime,
         context: RequestContext,
     ) -> UserAccount:
-        assert claims.email is not None
+        email = claims.email
+        if email is None:
+            raise invalid_google_credentials()
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
         password_hash = await asyncio.to_thread(self.passwords.hash, unusable_password)
         user = UserAccount(
             id=uuid4(),
-            email=claims.email,
+            email=email,
             display_name=self.policy.display_name(claims),
             password_hash=password_hash,
             roles=(self.settings.default_user_role,),
@@ -386,7 +363,7 @@ class GoogleLoginService:
             updated_at=now,
         )
         await transaction.insert_user(user)
-        await self._event(
+        await record_security_event(
             transaction,
             SecurityEventType.GOOGLE_ACCOUNT_CREATED,
             now,
@@ -405,7 +382,7 @@ class GoogleLoginService:
     ) -> SessionBundle:
         identity = self._identity(user.id, claims, now)
         await transaction.insert_external_identity(identity)
-        await self._event(
+        await record_security_event(
             transaction,
             SecurityEventType.GOOGLE_IDENTITY_LINKED,
             now,
@@ -449,7 +426,7 @@ class GoogleLoginService:
                     identity = self._identity(principal.user_id, claims, now)
                     await transaction.insert_external_identity(identity)
                     identity_inserted = True
-                    await self._event(
+                    await record_security_event(
                         transaction,
                         SecurityEventType.GOOGLE_IDENTITY_LINKED,
                         now,
@@ -464,12 +441,10 @@ class GoogleLoginService:
                     replace(
                         user,
                         google_auto_link_allowed=False,
-                        security_version=user.security_version + 1,
-                        updated_at=now,
-                    )
+                    ).advance_security_version(now)
                 )
             if failure is not None:
-                await self._event(
+                await record_security_event(
                     transaction,
                     SecurityEventType.GOOGLE_LINK_FAILED,
                     now,
@@ -501,7 +476,7 @@ class GoogleLoginService:
                 )
                 if identity is not None and identity.user_id == principal.user_id:
                     return identity
-            await self._event(
+            await record_security_event(
                 transaction,
                 SecurityEventType.GOOGLE_LINK_FAILED,
                 now,
@@ -529,7 +504,7 @@ class GoogleLoginService:
         *,
         provider_unavailable: bool = False,
     ) -> None:
-        now = self._now()
+        now = clock_now(self.clock)
         event_type = (
             SecurityEventType.GOOGLE_LINK_FAILED
             if linking
@@ -539,39 +514,11 @@ class GoogleLoginService:
         if provider_unavailable:
             metadata = {"provider_unavailable": True}
         async with self.store.transaction() as transaction:
-            await self._event(transaction, event_type, now, context, metadata=metadata)
-
-    async def _event(
-        self,
-        transaction: GoogleTransaction,
-        event_type: SecurityEventType,
-        now: datetime,
-        context: RequestContext,
-        *,
-        user_id: UUID | None = None,
-        session_id: UUID | None = None,
-        metadata: dict[str, str | int | bool | None] | None = None,
-    ) -> None:
-        await transaction.add_security_event(
-            SecurityEvent.from_request(
-                event_type,
-                now,
-                context=context,
-                user_id=user_id,
-                session_id=session_id,
-                metadata=metadata,
-            )
-        )
+            await record_security_event(transaction, event_type, now, context, metadata=metadata)
 
     def _require_recent_authentication(self, principal: Principal) -> None:
         if principal.must_change_password:
             raise forbidden("Password change is required before linking Google.")
         maximum = timedelta(seconds=self.settings.google_link_max_age_seconds)
-        if self._now() - principal.authenticated_at > maximum:
+        if clock_now(self.clock) - principal.authenticated_at > maximum:
             raise forbidden("Recent authentication is required to link Google.")
-
-    def _now(self) -> datetime:
-        value = self.clock()
-        if value.tzinfo is None:
-            raise ValueError("clock must return a timezone-aware datetime")
-        return value.astimezone(UTC)
