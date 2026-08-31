@@ -410,3 +410,8 @@ class AuthSettings(BaseSettings):
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]
+
+
+def load_auth_settings() -> AuthSettings:
+    """Load validated configuration from ``EPOK_AUTH_*`` variables."""
+    return AuthSettings()  # pyright: ignore[reportCallIssue]

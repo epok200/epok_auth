@@ -1,6 +1,10 @@
+import os
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
+from epok_auth import load_auth_settings
 from epok_auth.config import AuthSettings, Environment
 
 SECRET = "strong-test-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -28,6 +32,37 @@ def test_development_factory_is_safe_for_local_http() -> None:
     assert "http://localhost:3000" in settings.trusted_origins
     assert settings.passkey_rp_id == "localhost"
     assert len(settings.jwt_secret.get_secret_value()) >= 32
+
+
+def test_load_auth_settings_reads_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    for name in tuple(os.environ):
+        if name.startswith("EPOK_AUTH_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("EPOK_AUTH_ENVIRONMENT", "test")
+    monkeypatch.setenv("EPOK_AUTH_JWT_SECRET", SECRET)
+
+    settings = load_auth_settings()
+
+    assert settings.environment is Environment.TEST
+    assert settings.jwt_secret.get_secret_value() == SECRET
+    assert SECRET not in repr(settings)
+
+
+def test_load_auth_settings_requires_jwt_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    for name in tuple(os.environ):
+        if name.startswith("EPOK_AUTH_"):
+            monkeypatch.delenv(name)
+
+    with pytest.raises(ValidationError, match="jwt_secret"):
+        load_auth_settings()
 
 
 @pytest.mark.parametrize(

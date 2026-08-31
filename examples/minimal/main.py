@@ -1,8 +1,8 @@
 from fastapi import Depends, FastAPI
 
-from epok_auth import AuthSettings, EpokAuth, Principal
+from epok_auth import EpokAuth, Principal, load_auth_settings
 
-settings = AuthSettings()
+settings = load_auth_settings()
 auth = EpokAuth.postgres(settings=settings)
 
 app = FastAPI(title="epok-auth minimal example", lifespan=auth.lifespan)

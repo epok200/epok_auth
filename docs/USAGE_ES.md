@@ -319,16 +319,16 @@ uv run epok-auth create-admin
 
 La segunda ejecución debe fallar porque la librería no permite crear dos administradores iniciales mediante este comando.
 
-## 9. Referencia de `AuthSettings`
+## 9. Referencia de configuración
 
-### `AuthSettings()`
+### `load_auth_settings()`
 
-Carga la configuración desde `.env` y desde variables con prefijo `EPOK_AUTH_`.
+Carga y valida la configuración desde `.env` y desde variables con prefijo `EPOK_AUTH_` sin generar diagnósticos de argumentos faltantes en Pyright.
 
 ```python
-from epok_auth import AuthSettings
+from epok_auth import load_auth_settings
 
-settings = AuthSettings()
+settings = load_auth_settings()
 ```
 
 El entorno predeterminado es `production`, por lo que una configuración incompleta falla de forma cerrada. Para la primera prueba usa el `.env` de esta guía.
@@ -392,7 +392,9 @@ contrato automáticamente.
 Crea el store PostgreSQL oficial y devuelve la integración lista para instalar.
 
 ```python
-settings = AuthSettings()
+from epok_auth import EpokAuth, load_auth_settings
+
+settings = load_auth_settings()
 auth = EpokAuth.postgres(settings=settings)
 ```
 

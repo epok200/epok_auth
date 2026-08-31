@@ -1,6 +1,6 @@
 from importlib.metadata import PackageNotFoundError, version
 
-from epok_auth.config import AuthSettings, Environment
+from epok_auth.config import AuthSettings, Environment, load_auth_settings
 from epok_auth.email_links import (
     AuthEmail,
     AuthEmailKind,
@@ -49,4 +49,5 @@ __all__ = [
     "UserAccount",
     "UserStatus",
     "__version__",
+    "load_auth_settings",
 ]

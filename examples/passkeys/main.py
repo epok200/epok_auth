@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from epok_auth import AuthSettings, EpokAuth
+from epok_auth import EpokAuth, load_auth_settings
 
-settings = AuthSettings()
+settings = load_auth_settings()
 auth = EpokAuth.postgres(settings=settings)
 
 app = FastAPI(title="epok-auth passkeys example")
