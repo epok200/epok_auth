@@ -1,9 +1,11 @@
+from dataclasses import replace
+
 import pytest
 
 from epok_auth.config import GoogleAccountMode
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.google.models import GOOGLE_ISSUER
-from epok_auth.models import SecurityEventType, UserUpdate
+from epok_auth.models import SecurityEventType, UserStatus, UserUpdate
 from epok_auth.testing import MemoryAuthStore
 from tests.conftest import MutableClock
 from tests.google.fakes import ORIGIN, claims, create_harness
@@ -158,6 +160,42 @@ async def test_preauthorized_login_never_replaces_a_stable_password(
         "stable password protects private colors",
     )
     assert password_session.principal.user_id == admin.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_preauthorized_google_login_rejects_a_pending_account(
+    settings,
+    store: MemoryAuthStore,
+    clock: MutableClock,
+) -> None:
+    harness = create_harness(
+        settings,
+        store,
+        clock,
+        mode=GoogleAccountMode.PREAUTHORIZED,
+    )
+    provisioned = await harness.auth.create_user(
+        email="pending@example.com",
+        display_name="Pending",
+        google_auto_link_allowed=True,
+    )
+    async with store.transaction() as transaction:
+        await transaction.update_user(
+            replace(provisioned.user, status=UserStatus.PENDING_ACTIVATION)
+        )
+    options = await harness.google.begin_login(ORIGIN)
+    harness.verifier.add(
+        "pending-token",
+        claims(email=provisioned.user.email, hosted_domain="example.com"),
+    )
+
+    with pytest.raises(AuthError) as captured:
+        await harness.google.finish_login(options.challenge_id, "pending-token", ORIGIN)
+
+    assert captured.value.code is AuthErrorCode.GOOGLE_CREDENTIAL_INVALID
+    assert store.external_identities == {}
+    assert store.sessions == {}
 
 
 @pytest.mark.asyncio

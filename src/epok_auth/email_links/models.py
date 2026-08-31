@@ -3,8 +3,11 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
+from epok_auth.models import UserAccount
+
 
 class EmailLinkPurpose(StrEnum):
+    ACTIVATION = "activation"
     LOGIN = "login"
     PASSWORD_RESET = "password_reset"
     INVITATION = "invitation"
@@ -19,6 +22,7 @@ class EmailLinkState(StrEnum):
 
 
 class AuthEmailKind(StrEnum):
+    ACTIVATION = "activation"
     LOGIN = "login"
     PASSWORD_RESET = "password_reset"
     INVITATION = "invitation"
@@ -62,3 +66,15 @@ class PendingEmailLink:
 class EmailLinkIssue:
     pending: PendingEmailLink | None = field(default=None, repr=False)
     browser_nonce: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class AccountActivation:
+    user: UserAccount
+    pending: PendingEmailLink = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class InitialAdminActivation:
+    user: UserAccount
+    pending: PendingEmailLink | None = field(default=None, repr=False)

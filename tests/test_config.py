@@ -255,6 +255,24 @@ def test_email_link_urls_are_normalized_and_bound_to_trusted_origins() -> None:
     assert settings.trusted_origins[-1] == "http://[::1]:3000"
 
 
+def test_account_activation_url_is_independently_configurable() -> None:
+    settings = make(
+        trusted_origins=("https://app.example.com",),
+        email_link_activation_url="HTTPS://APP.EXAMPLE.COM:443/activate/",
+    )
+
+    assert settings.email_link_activation_url == "https://app.example.com/activate"
+
+    with pytest.raises(ValidationError, match="trusted origins"):
+        make(email_link_activation_url="https://app.example.com/activate")
+    with pytest.raises(ValidationError, match="retention"):
+        make(
+            email_link_activation_url="http://localhost:3000/activate",
+            email_link_activation_ttl_seconds=600,
+            email_link_retention_seconds=300,
+        )
+
+
 @pytest.mark.parametrize(
     "url",
     [

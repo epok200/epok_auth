@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+import epok_auth.email_links.service as email_link_module
 from epok_auth.config import AuthSettings
 from epok_auth.email_links.mailer import EmailLinkMailer
 from epok_auth.email_links.models import AuthEmail, AuthEmailKind, EmailLinkState
@@ -440,15 +441,19 @@ async def test_recovery_revalidates_account_eligibility_after_preflight(
     harness: EmailLinkHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def deny_request(*args) -> bool:
+        del args
+        return False
+
     reset_user, _ = await harness.user(email="reset-race@example.com", email_login=False)
     reset_issue = await harness.links.request_password_reset(reset_user.email)
     assert reset_issue.pending is not None
     await harness.mailer.deliver(reset_issue.pending)
     with monkeypatch.context() as patch:
         patch.setattr(
-            EmailLinkService,
-            "_can_reset_password",
-            staticmethod(lambda user: False),
+            email_link_module,
+            "can_request",
+            deny_request,
         )
         with pytest.raises(AuthError):
             await harness.links.reset_password(token_from(reset_issue.pending.email), NEW_PASSWORD)
@@ -463,9 +468,9 @@ async def test_recovery_revalidates_account_eligibility_after_preflight(
     await harness.mailer.deliver(invitation.pending)
     with monkeypatch.context() as patch:
         patch.setattr(
-            EmailLinkService,
-            "_can_invite",
-            staticmethod(lambda user: False),
+            email_link_module,
+            "can_request",
+            deny_request,
         )
         with pytest.raises(AuthError):
             await harness.links.activate_invitation(token_from(invitation.pending.email))
@@ -490,13 +495,13 @@ async def test_password_reset_fails_closed_when_atomic_consumption_loses_race(
     assert captured.value.code is AuthErrorCode.EMAIL_LINK_INVALID
 
 
-def test_service_requires_frontend_urls(
+def test_service_requires_at_least_one_frontend_url(
     settings: AuthSettings,
     store: MemoryAuthStore,
     clock: MutableClock,
 ) -> None:
     auth = AuthService(store=store, settings=settings, clock=clock)
-    with pytest.raises(ValueError, match="frontend URLs"):
+    with pytest.raises(ValueError, match="frontend URL"):
         EmailLinkService(
             store=store,
             settings=settings,
@@ -504,6 +509,18 @@ def test_service_requires_frontend_urls(
             passwords=auth.passwords,
             clock=clock,
         )
+
+    activation_settings = settings.model_copy(
+        update={"email_link_activation_url": "http://localhost:3000/auth/activate"}
+    )
+    service = EmailLinkService(
+        store=store,
+        settings=activation_settings,
+        signer=auth.signer,
+        passwords=auth.passwords,
+        clock=clock,
+    )
+    assert service.settings is activation_settings
 
 
 async def test_naive_clock_is_rejected(harness: EmailLinkHarness) -> None:

@@ -8,6 +8,8 @@ from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from epok_auth.config import AuthSettings, Environment
+from epok_auth.email_links._policy import require_standard_urls
+from epok_auth.email_links.activation import AccountActivationService
 from epok_auth.email_links.dispatcher import EmailLinkDispatcher
 from epok_auth.email_links.mailer import EmailLinkMailer
 from epok_auth.email_links.service import EmailLinkService
@@ -67,6 +69,7 @@ class EpokAuth:
         self.email_link_sender = email_link_sender
         self.email_link_store = email_link_store
         self.email_link_dispatcher = email_link_dispatcher
+        self._account_activation: AccountActivationService | None = None
         self._email_link_mailer: EmailLinkMailer | None = None
         self._http = AuthHttpTransport(settings)
         self._resources = AsyncExitStack()
@@ -77,6 +80,22 @@ class EpokAuth:
     def http(self) -> AuthHttpTransport:
         """Return the public HTTP transport owned by this facade."""
         return self._http
+
+    @property
+    def email_links(self) -> EmailLinkService:
+        return self._email_links()
+
+    @property
+    def account_activation(self) -> AccountActivationService:
+        if self._account_activation is None:
+            store = self.email_link_store or cast(EmailLinkStore, self.store)
+            self._account_activation = AccountActivationService(
+                store=store,
+                settings=self.settings,
+                passwords=self.service.passwords,
+                clock=self.service.clock,
+            )
+        return self._account_activation
 
     @classmethod
     def postgres(
@@ -219,6 +238,7 @@ class EpokAuth:
         )
 
     def email_link_router(self, *, prefix: str = "/auth/email-links") -> APIRouter:
+        require_standard_urls(self.settings)
         dispatcher = self._email_dispatcher()
         return create_email_link_router(
             service=self._email_links(),
@@ -230,6 +250,7 @@ class EpokAuth:
         )
 
     def email_link_admin_router(self, *, prefix: str = "/auth/users") -> APIRouter:
+        require_standard_urls(self.settings)
         dispatcher = self._email_dispatcher()
         return create_email_link_admin_router(
             service=self._email_links(),

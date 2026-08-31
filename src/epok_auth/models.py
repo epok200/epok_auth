@@ -12,6 +12,7 @@ def _empty_security_metadata() -> SecurityMetadata:
 
 
 class UserStatus(StrEnum):
+    PENDING_ACTIVATION = "pending_activation"
     ACTIVE = "active"
     DISABLED = "disabled"
 
@@ -19,6 +20,7 @@ class UserStatus(StrEnum):
 class SecurityEventType(StrEnum):
     ADMIN_CREATED = "admin.created"
     USER_CREATED = "user.created"
+    ACCOUNT_ACTIVATED = "account.activated"
     USER_UPDATED = "user.updated"
     USER_DISABLED = "user.disabled"
     USER_ENABLED = "user.enabled"
@@ -98,6 +100,14 @@ class UserAccount:
             self._replace_password(password_hash, at),
             must_change_password=False,
             password_login_enabled=True,
+        )
+
+    def activate_account(self, password_hash: str, at: datetime) -> Self:
+        if self.status is not UserStatus.PENDING_ACTIVATION:
+            raise ValueError("only a pending account can be activated")
+        return replace(
+            self.activate_password(password_hash, at),
+            status=UserStatus.ACTIVE,
         )
 
     def disable_password(self, password_hash: str, at: datetime) -> Self:

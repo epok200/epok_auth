@@ -102,9 +102,11 @@ class AuthSettings(BaseSettings):
     email_link_login_url: str | None = None
     email_link_password_reset_url: str | None = None
     email_link_invitation_url: str | None = None
+    email_link_activation_url: str | None = None
     email_link_login_ttl_seconds: int = Field(default=10 * 60, ge=60, le=60 * 60)
     email_link_password_reset_ttl_seconds: int = Field(default=15 * 60, ge=60, le=60 * 60)
     email_link_invitation_ttl_seconds: int = Field(default=24 * 60 * 60, ge=300, le=86400)
+    email_link_activation_ttl_seconds: int = Field(default=24 * 60 * 60, ge=300, le=86400)
     email_link_request_window_seconds: int = Field(default=15 * 60, ge=60, le=86400)
     email_link_max_requests_per_window: int = Field(default=3, ge=1, le=20)
     email_link_retention_seconds: int = Field(default=7 * 86400, ge=300, le=90 * 86400)
@@ -249,6 +251,7 @@ class AuthSettings(BaseSettings):
         "email_link_login_url",
         "email_link_password_reset_url",
         "email_link_invitation_url",
+        "email_link_activation_url",
     )
     @classmethod
     def validate_email_link_url(cls, value: str | None) -> str | None:
@@ -317,7 +320,7 @@ class AuthSettings(BaseSettings):
         )
         if any(email_link_urls) and not all(email_link_urls):
             raise ValueError("all email link frontend URLs must be configured together")
-        for url in email_link_urls:
+        for url in (*email_link_urls, self.email_link_activation_url):
             if url is None:
                 continue
             parsed = urlsplit(url)
@@ -328,6 +331,7 @@ class AuthSettings(BaseSettings):
             self.email_link_login_ttl_seconds,
             self.email_link_password_reset_ttl_seconds,
             self.email_link_invitation_ttl_seconds,
+            self.email_link_activation_ttl_seconds,
             self.email_link_request_window_seconds,
         )
         if self.email_link_retention_seconds < minimum_retention:

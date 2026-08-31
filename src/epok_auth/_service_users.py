@@ -159,6 +159,13 @@ class UserServiceMethods(AuthServiceBase):
                 else current.scopes
             )
             status = update.status or current.status
+            if update.status is UserStatus.PENDING_ACTIVATION or (
+                current.status is UserStatus.PENDING_ACTIVATION and update.status is not None
+            ):
+                raise AuthError(
+                    AuthErrorCode.FORBIDDEN,
+                    "Pending account activation cannot be changed through user updates.",
+                )
             display_name = (
                 normalize_display_name(update.display_name)
                 if update.display_name is not None

@@ -48,7 +48,10 @@ user_account = Table(
         "length(display_name) BETWEEN 1 AND 200",
         name="ck_epok_auth_user_display_name_length",
     ),
-    CheckConstraint("status IN ('active', 'disabled')", name="ck_epok_auth_user_status"),
+    CheckConstraint(
+        "status IN ('pending_activation', 'active', 'disabled')",
+        name="ck_epok_auth_user_status",
+    ),
     CheckConstraint(
         "jsonb_typeof(roles) = 'array' AND jsonb_typeof(scopes) = 'array'",
         name="ck_epok_auth_user_capabilities_arrays",
@@ -324,7 +327,7 @@ email_link = Table(
         name="uq_epok_auth_email_link_generation",
     ),
     CheckConstraint(
-        "purpose IN ('login', 'password_reset', 'invitation')",
+        "purpose IN ('activation', 'login', 'password_reset', 'invitation')",
         name="ck_epok_auth_email_link_purpose",
     ),
     CheckConstraint(
