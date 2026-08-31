@@ -4,12 +4,12 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-Version `0.5.0` also includes browser-bound Magic Links, password recovery, pre-provisioned
-invitations and native SMTP delivery. The unreleased source adds pending-account activation and an
-idempotent initial-administrator bootstrap through the same account, role and email-link models. See
+Version `0.6.0` includes browser-bound Magic Links, password recovery, pre-provisioned invitations,
+native SMTP delivery, pending-account activation and an idempotent initial-administrator bootstrap
+through the same account, role and email-link models. See
 [`docs/MAGIC_LINKS_ES.md`](docs/MAGIC_LINKS_ES.md).
 
-> **Status:** the latest release is the `0.5.0` beta. Public APIs may still change before `1.0`.
+> **Status:** this source tree defines the `0.6.0` beta. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -19,8 +19,8 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 | Gate | Evidence |
 |---|---|
-| Functional and adversarial tests | 387/387 passing, plus passkey, Google and Magic Link browser proofs |
-| Branch coverage | 98.25% |
+| Functional and adversarial tests | 403/403 passing, plus passkey, Google and Magic Link browser proofs |
+| Branch coverage | 98.05% |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |

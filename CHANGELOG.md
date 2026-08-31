@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-08-31
 
 - add pending accounts that cannot use password, refresh, Google or Passkeys before activation;
 - add single-use first-password activation through the existing email-link store and delivery
