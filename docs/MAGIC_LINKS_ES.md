@@ -1,10 +1,11 @@
 # Magic Links, recuperación e invitaciones
 
-`epok-auth` incluye un flujo completo de enlaces de correo para tres casos:
+`epok-auth` incluye enlaces de correo para cuatro casos:
 
 1. iniciar sesión sin contraseña;
 2. recuperar una contraseña local;
-3. activar una cuenta previamente creada por el producto.
+3. aceptar una invitación sobre una cuenta con contraseña temporal;
+4. activar una cuenta pendiente y establecer su primera contraseña.
 
 La librería crea y valida el token, controla su expiración y uso único, persiste solo hashes,
 construye el correo, envía por SMTP y emite la sesión normal cuando corresponde. El producto sigue
@@ -18,12 +19,14 @@ SMTP usa únicamente la biblioteca estándar de Python. No requiere un extra:
 uv add "epok-auth[postgres]"
 ```
 
-Configura los tres destinos frontend. SMTP directo es apropiado para desarrollo y pruebas:
+Configura los destinos que use el producto. Los tres destinos estándar se habilitan juntos; la
+activación puede configurarse por separado. SMTP directo es apropiado para desarrollo y pruebas:
 
 ```dotenv
 EPOK_AUTH_EMAIL_LINK_LOGIN_URL=https://app.example.com/auth/email-link
 EPOK_AUTH_EMAIL_LINK_PASSWORD_RESET_URL=https://app.example.com/auth/reset-password
 EPOK_AUTH_EMAIL_LINK_INVITATION_URL=https://app.example.com/auth/invitation
+EPOK_AUTH_EMAIL_LINK_ACTIVATION_URL=https://app.example.com/auth/activate
 
 EPOK_AUTH_SMTP_HOST=smtp.gmail.com
 EPOK_AUTH_SMTP_PORT=587
@@ -38,7 +41,7 @@ Para Gmail usa una contraseña de aplicación, no la contraseña normal de la cu
 un JSON de OAuth para SMTP. Las credenciales pertenecen al entorno o al gestor de secretos del
 despliegue y nunca al repositorio.
 
-Los tres destinos deben usar HTTPS, excepto localhost, no pueden incluir query ni fragment y su
+Los destinos deben usar HTTPS, excepto localhost, no pueden incluir query ni fragment y su
 Origin debe existir en `EPOK_AUTH_TRUSTED_ORIGINS`.
 
 ## FastAPI en una bandera
@@ -117,6 +120,48 @@ Una invitación solo aplica a una cuenta activa que el producto ya creó y que t
 primer cambio de contraseña. Activarla deshabilita la contraseña temporal, habilita Magic Link y no
 crea una sesión. La persona solicita después un enlace normal ligado a su navegador.
 
+## Activación de cuentas pendientes
+
+La activación es una capacidad del mismo `EpokAuth`, no un sistema de usuarios paralelo. Reutiliza
+`UserAccount`, roles, scopes, password manager, persistencia, eventos y `security_version`.
+
+```python
+activation = await auth.account_activation.provision(
+    email="person@example.com",
+    display_name="Person",
+    roles=("user",),
+)
+await durable_email_queue.dispatch(activation.pending)
+```
+
+El worker entrega `activation.pending` con el mismo `EmailLinkMailer` y, solo después de que el
+proveedor acepta el correo, confirma el enlace con `auth.email_links.mark_delivered()`. El producto
+consume el token desde su propio endpoint:
+
+```python
+user = await auth.account_activation.activate(token, first_password)
+```
+
+La transición es única: `pending_activation -> active`. Antes de completarla, password, refresh,
+Google y Passkeys rechazan la cuenta a través de la regla compartida `can_authenticate()`. Consumir
+el enlace establece la primera contraseña, habilita el login local, registra el evento y no crea una
+sesión.
+
+El administrador inicial usa una operación separada para proteger el rol reservado:
+
+```python
+bootstrap = await auth.account_activation.ensure_initial_admin(
+    email="owner@example.com",
+    display_name="Product owner",
+)
+if bootstrap.pending is not None:
+    await durable_email_queue.dispatch(bootstrap.pending)
+```
+
+La operación es atómica e idempotente para el mismo correo. La activación genérica rechaza el rol
+administrativo, y un segundo correo no puede crear otro administrador inicial. La librería no
+instala rutas, no inicia un worker y no decide cuándo debe ejecutarse el bootstrap.
+
 ## Sender directo en desarrollo o worker
 
 SMTP es el adaptador nativo, pero el núcleo no depende de él. Cualquier proveedor implementa un
@@ -185,6 +230,10 @@ mensaje externo.
 ## Invariantes de seguridad
 
 - El token tiene 256 bits aleatorios y PostgreSQL guarda solo SHA-256.
+- Una cuenta pendiente no puede autenticarse por password, refresh, Google ni Passkeys.
+- La activación establece la primera contraseña, no crea una sesión y no puede repetirse.
+- El rol administrativo reservado solo puede entrar por la operación atómica de administrador
+  inicial.
 - Cada enlace expira, tiene una sola generación activa y se consume una sola vez.
 - Un enlace nuevo no invalida al anterior hasta que el proveedor acepta el nuevo correo.
 - Login por correo requiere una cookie `HttpOnly` secreta del navegador que hizo la solicitud.

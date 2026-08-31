@@ -5,10 +5,11 @@
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
 Version `0.5.0` also includes browser-bound Magic Links, password recovery, pre-provisioned
-invitations and native SMTP delivery. See
+invitations and native SMTP delivery. The unreleased source adds pending-account activation and an
+idempotent initial-administrator bootstrap through the same account, role and email-link models. See
 [`docs/MAGIC_LINKS_ES.md`](docs/MAGIC_LINKS_ES.md).
 
-> **Status:** this source tree defines the `0.5.0` beta. Public APIs may still change before `1.0`.
+> **Status:** the latest release is the `0.5.0` beta. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -83,6 +84,7 @@ EPOK_AUTH_GOOGLE_ACCOUNT_MODE=linked_only
 EPOK_AUTH_EMAIL_LINK_LOGIN_URL=https://colors.example.com/auth/email-link
 EPOK_AUTH_EMAIL_LINK_PASSWORD_RESET_URL=https://colors.example.com/auth/reset-password
 EPOK_AUTH_EMAIL_LINK_INVITATION_URL=https://colors.example.com/auth/invitation
+EPOK_AUTH_EMAIL_LINK_ACTIVATION_URL=https://colors.example.com/auth/activate
 ```
 
 Production configuration is **fail-closed**: weak secrets, insecure cookies, generic issuer/audience values, missing PostgreSQL, and ambiguous origins prevent startup.
@@ -123,6 +125,20 @@ uv run epok-auth create-admin
 ```
 
 The first administrator is serialized transactionally. A second initial-admin creation attempt fails rather than racing.
+
+Products that activate their first administrator by email use the public facade instead of the CLI:
+
+```python
+bootstrap = await auth.account_activation.ensure_initial_admin(
+    email="owner@example.com",
+    display_name="Product owner",
+)
+if bootstrap.pending is not None:
+    await durable_email_queue.dispatch(bootstrap.pending)
+```
+
+Repeated calls for the same administrator return the existing account without issuing another
+link. A different account cannot claim the library administrator role through generic activation.
 
 ## FastAPI integration
 
@@ -220,6 +236,11 @@ service = auth.service
 `auth.http` remains the owner of cookies, cache headers and request metadata. `auth.service` remains
 the owner of account and session rules. Product routers may wrap the published schemas, but must not
 copy those security rules or install the private router factories.
+
+`auth.account_activation` is the product-owned transport boundary for creating a pending account,
+replacing its activation link and consuming the first-password transition. It reuses the same
+`UserAccount`, roles, password manager, store, audit events and security fencing as the rest of
+`EpokAuth`. The library intentionally does not install activation routes or start email delivery.
 
 `auth.current_user`, `auth.authenticated`, `auth.require_roles()`, `auth.require_scopes()` and
 `auth.require_recent_authentication()` are stable public dependencies for product-owned routers.
