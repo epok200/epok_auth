@@ -331,9 +331,13 @@ class AuthSettings(BaseSettings):
             self.email_link_login_ttl_seconds,
             self.email_link_password_reset_ttl_seconds,
             self.email_link_invitation_ttl_seconds,
-            self.email_link_activation_ttl_seconds,
             self.email_link_request_window_seconds,
         )
+        if self.email_link_activation_url is not None:
+            minimum_retention = max(
+                minimum_retention,
+                self.email_link_activation_ttl_seconds,
+            )
         if self.email_link_retention_seconds < minimum_retention:
             raise ValueError("email link retention must cover every TTL and rate-limit window")
 

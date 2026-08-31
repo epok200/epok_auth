@@ -273,6 +273,22 @@ def test_account_activation_url_is_independently_configurable() -> None:
         )
 
 
+def test_disabled_account_activation_does_not_change_email_link_retention() -> None:
+    settings = make(
+        email_link_login_url="http://localhost:3000/login",
+        email_link_password_reset_url="http://localhost:3000/reset",
+        email_link_invitation_url="http://localhost:3000/invitation",
+        email_link_login_ttl_seconds=60,
+        email_link_password_reset_ttl_seconds=60,
+        email_link_invitation_ttl_seconds=300,
+        email_link_request_window_seconds=60,
+        email_link_retention_seconds=300,
+    )
+
+    assert settings.email_link_activation_url is None
+    assert settings.email_link_retention_seconds == 300
+
+
 @pytest.mark.parametrize(
     "url",
     [
