@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 - 2026-08-30
+
+- expose the FastAPI transport and session schemas for product-owned routers;
+- normalize request identifiers before recording security events.
+
 ## 0.4.1 - 2026-08-30
 
 - add a typed `load_auth_settings()` entry point for environment-backed configuration.

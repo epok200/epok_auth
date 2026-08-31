@@ -4,13 +4,11 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-Version `0.4.0` also includes browser-bound Magic Links, password recovery, pre-provisioned
+Version `0.5.0` also includes browser-bound Magic Links, password recovery, pre-provisioned
 invitations and native SMTP delivery. See
 [`docs/MAGIC_LINKS_ES.md`](docs/MAGIC_LINKS_ES.md).
 
-> **Status:** `0.4.0` is the current beta with WebAuthn passkeys, Google Sign-In, Magic Links and
-> isolated Alembic history for host application compatibility. Public APIs may still change before
-> `1.0`.
+> **Status:** this source tree defines the `0.5.0` beta. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -20,8 +18,8 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 | Gate | Evidence |
 |---|---|
-| Functional and adversarial tests | 374/374 passing, plus passkey, Google and Magic Link browser proofs |
-| Branch coverage | 98.40% |
+| Functional and adversarial tests | 387/387 passing, plus passkey, Google and Magic Link browser proofs |
+| Branch coverage | 98.25% |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |
@@ -31,7 +29,7 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 The repository does not claim that vulnerabilities are impossible. The green gate establishes reproducible evidence for the defined beta threat model and invariants.
 
-## What 0.4.0 includes
+## What 0.5.0 includes
 
 - Argon2id password hashing through `pwdlib`, with rehash support and dummy verification;
 - local users, active/disabled state, roles, scopes, administrative provisioning and reset;
@@ -200,6 +198,33 @@ POST /api/v1/auth/users/{user_id}/invitation
 ```
 
 The recovery route and the rest of user administration appear only with `include_admin=True`.
+
+### Product-owned routers
+
+Products with their own JSON envelope can build thin routers over the public service and transport
+without importing internal modules:
+
+```python
+from epok_auth.fastapi import (
+    AuthHttpTransport,
+    ChangePasswordRequest,
+    LoginRequest,
+    PrincipalResponse,
+    SessionResponse,
+)
+
+transport: AuthHttpTransport = auth.http
+service = auth.service
+```
+
+`auth.http` remains the owner of cookies, cache headers and request metadata. `auth.service` remains
+the owner of account and session rules. Product routers may wrap the published schemas, but must not
+copy those security rules or install the private router factories.
+
+`auth.current_user`, `auth.authenticated`, `auth.require_roles()`, `auth.require_scopes()` and
+`auth.require_recent_authentication()` are stable public dependencies for product-owned routers.
+
+The existing `auth.install()`, router helpers and exception handlers keep their current behavior.
 
 ## Application boundary
 

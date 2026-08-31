@@ -344,6 +344,10 @@ def _base_check_code() -> str:
             "from fastapi import FastAPI",
             "from epok_auth import AuthSettings, EpokAuth",
             "from epok_auth.email_links import AuthEmail, PendingEmailLink",
+            (
+                "from epok_auth.fastapi import AuthHttpTransport, ChangePasswordRequest, "
+                "LoginRequest, PrincipalResponse, SessionResponse"
+            ),
             "from epok_auth.testing import MemoryAuthStore",
             "expected = os.environ['EPOK_AUTH_EXPECTED_VERSION']",
             "assert version('epok-auth') == expected == epok_auth.__version__",
@@ -354,6 +358,11 @@ def _base_check_code() -> str:
                 "'0004_email_links.py').is_file()"
             ),
             "auth = EpokAuth(settings=AuthSettings.development(), store=MemoryAuthStore())",
+            "assert isinstance(auth.http, AuthHttpTransport)",
+            (
+                "assert all(contract is not None for contract in "
+                "(LoginRequest, ChangePasswordRequest, PrincipalResponse, SessionResponse))"
+            ),
             "try:",
             "    auth.install(FastAPI(), include_passkeys=True)",
             "except RuntimeError as error:",

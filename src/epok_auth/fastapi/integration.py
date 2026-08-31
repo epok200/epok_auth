@@ -73,6 +73,11 @@ class EpokAuth:
         self._app: FastAPI | None = None
         self._owns_resources = google_store is not None and google is None
 
+    @property
+    def http(self) -> AuthHttpTransport:
+        """Return the public HTTP transport owned by this facade."""
+        return self._http
+
     @classmethod
     def postgres(
         cls,
