@@ -5,7 +5,7 @@ from typing import Annotated, cast
 import typer
 from pydantic import SecretStr, ValidationError
 
-from epok_auth.config import AuthSettings
+from epok_auth.config import AuthSettings, load_auth_settings
 
 app = typer.Typer(
     name="epok-auth",
@@ -29,7 +29,7 @@ def generate_secret(
 def check_config() -> None:
     """Validate environment configuration without printing secrets."""
     try:
-        settings = _load_settings()
+        settings = load_auth_settings()
     except ValidationError as error:
         typer.echo("epok-auth configuration is invalid.", err=True)
         for item in error.errors(include_url=False, include_input=False):
@@ -111,14 +111,9 @@ async def _create_admin(
         await store.aclose()
 
 
-def _load_settings() -> AuthSettings:
-    # BaseSettings obtains required values from the environment at runtime.
-    return AuthSettings()  # pyright: ignore[reportCallIssue]
-
-
 def _settings_with_database() -> AuthSettings:
     try:
-        settings = _load_settings()
+        settings = load_auth_settings()
     except ValidationError as error:
         typer.echo("epok-auth configuration is invalid. Run `epok-auth check-config`.", err=True)
         raise typer.Exit(code=1) from error

@@ -131,9 +131,9 @@ The first administrator is serialized transactionally. A second initial-admin cr
 ```python
 from fastapi import Depends, FastAPI
 
-from epok_auth import AuthSettings, EpokAuth, Principal
+from epok_auth import EpokAuth, Principal, load_auth_settings
 
-settings = AuthSettings()
+settings = load_auth_settings()
 auth = EpokAuth.postgres(
     settings=settings,
     email_link_dispatcher=durable_email_queue,

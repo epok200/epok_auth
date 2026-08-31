@@ -45,9 +45,9 @@ Habilita las rutas al instalar la integración:
 ```python
 from fastapi import FastAPI
 
-from epok_auth import AuthSettings, EpokAuth
+from epok_auth import EpokAuth, load_auth_settings
 
-settings = AuthSettings()
+settings = load_auth_settings()
 auth = EpokAuth.postgres(settings=settings)
 
 app = FastAPI()

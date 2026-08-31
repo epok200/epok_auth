@@ -46,9 +46,9 @@ Origin debe existir en `EPOK_AUTH_TRUSTED_ORIGINS`.
 ```python
 from fastapi import FastAPI
 
-from epok_auth import AuthSettings, EpokAuth
+from epok_auth import EpokAuth, load_auth_settings
 
-settings = AuthSettings()
+settings = load_auth_settings()
 # Adaptador durable del producto. El contrato completo aparece más abajo.
 auth = EpokAuth.postgres(
     settings=settings,

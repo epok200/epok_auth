@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-08-30
+
+- add a typed `load_auth_settings()` entry point for environment-backed configuration.
+
 ## 0.4.0 - 2026-08-25
 
 - add opt-in Magic Link login bound to the requesting browser;
