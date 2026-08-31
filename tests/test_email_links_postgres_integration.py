@@ -2,16 +2,20 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
 import pytest
 
 from epok_auth.config import AuthSettings, Environment
+from epok_auth.email_links.activation import AccountActivationService
 from epok_auth.email_links.mailer import EmailLinkMailer
 from epok_auth.email_links.models import AuthEmail, EmailLinkState
 from epok_auth.email_links.service import EmailLinkService
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.migrate import check_database, downgrade_database, upgrade_database
+from epok_auth.models import UserStatus
 from epok_auth.postgres import PostgresAuthStore
 from epok_auth.service import AuthService
 from epok_auth.store import StoreConflictError
@@ -22,6 +26,7 @@ pytestmark = pytest.mark.integration
 
 DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 ORIGIN = "http://localhost:3000"
+FIRST_PASSWORD = "postgres activation protects private colors"
 
 
 def sync_url(url: str) -> str:
@@ -69,6 +74,7 @@ def settings(database_url: str) -> AuthSettings:
         email_link_login_url=f"{ORIGIN}/login",
         email_link_password_reset_url=f"{ORIGIN}/reset-password",
         email_link_invitation_url=f"{ORIGIN}/invitation",
+        email_link_activation_url=f"{ORIGIN}/activation",
     )
 
 
@@ -92,6 +98,11 @@ class CapturingSender:
 class FailingSender:
     async def send(self, email: AuthEmail) -> None:
         raise RuntimeError(f"provider rejected {email.action_url}")
+
+
+def token_from(email: AuthEmail) -> str:
+    assert email.action_url is not None
+    return parse_qs(urlsplit(email.action_url).fragment)["token"][0]
 
 
 @pytest.mark.asyncio
@@ -192,6 +203,100 @@ def test_email_link_migration_downgrades_and_upgrades_cleanly(database_url: str)
     finally:
         upgrade_database(database_url)
     check_database(database_url)
+
+
+def test_account_activation_migration_downgrade_fails_closed(database_url: str) -> None:
+    user_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        with psycopg.connect(sync_url(database_url)) as connection:
+            connection.execute(
+                """
+                INSERT INTO epok_auth.user_account (
+                    id, email, display_name, password_hash, status, roles, scopes
+                ) VALUES (
+                    %s, 'pending@example.com', 'Pending', 'unusable',
+                    'pending_activation', '["user"]'::jsonb, '[]'::jsonb
+                )
+                """,
+                (user_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO epok_auth.email_link (
+                    id, user_id, purpose, generation, token_hash, recipient_hash,
+                    browser_hash, security_version, state, created_at, expires_at
+                ) VALUES (
+                    %s, %s, 'activation', 1, %s, %s, NULL, 0, 'pending', %s, %s
+                )
+                """,
+                (uuid4(), user_id, "a" * 64, "b" * 64, now, now + timedelta(hours=1)),
+            )
+
+        downgrade_database(database_url, "0004_email_links")
+
+        with psycopg.connect(sync_url(database_url)) as connection:
+            status = connection.execute(
+                "SELECT status FROM epok_auth.user_account WHERE id = %s",
+                (user_id,),
+            ).fetchone()[0]
+            links = connection.execute(
+                "SELECT count(*) FROM epok_auth.email_link WHERE user_id = %s",
+                (user_id,),
+            ).fetchone()[0]
+        assert status == "disabled"
+        assert links == 0
+    finally:
+        upgrade_database(database_url)
+    check_database(database_url)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_initial_admin_activation_creates_one_account_and_link(
+    store: PostgresAuthStore,
+    settings: AuthSettings,
+    database_url: str,
+) -> None:
+    auth = AuthService(store=store, settings=settings)
+    activation = AccountActivationService(
+        store=store,
+        settings=settings,
+        passwords=auth.passwords,
+        clock=auth.clock,
+    )
+
+    async def bootstrap():
+        return await activation.ensure_initial_admin(
+            email="owner@example.com",
+            display_name="Owner",
+        )
+
+    results = await asyncio.gather(bootstrap(), bootstrap())
+    created = next(result for result in results if result.pending is not None)
+    existing = next(result for result in results if result.pending is None)
+
+    with psycopg.connect(sync_url(database_url)) as connection:
+        users = connection.execute(
+            "SELECT count(*) FROM epok_auth.user_account WHERE roles @> '[\"admin\"]'::jsonb"
+        ).fetchone()[0]
+        links = connection.execute(
+            "SELECT count(*) FROM epok_auth.email_link WHERE purpose = 'activation'"
+        ).fetchone()[0]
+    assert created.user.id == existing.user.id
+    assert users == 1
+    assert links == 1
+
+    assert created.pending is not None
+    email_links = EmailLinkService(
+        store=store,
+        settings=settings,
+        signer=auth.signer,
+        passwords=auth.passwords,
+        clock=auth.clock,
+    )
+    await EmailLinkMailer(email_links, CapturingSender()).deliver(created.pending)
+    activated = await activation.activate(token_from(created.pending.email), FIRST_PASSWORD)
+    assert activated.status is UserStatus.ACTIVE
 
 
 @pytest.mark.asyncio

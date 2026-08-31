@@ -81,6 +81,10 @@
 | Email account enumeration | Generic public responses and persistent per-account request limits |
 | Email dispatch outage | Generic `202`, failed-link audit event and no provider detail in logs |
 | Token leakage through logs/history | URL fragment transport, `repr=False`, no `GET` consumption and `no-store` |
+| Pending-account credential bypass | Password, refresh, Google and Passkeys share the active-account gate |
+| Activation replay | Provider activation, expiry, security fencing and atomic one-time consumption |
+| Initial-admin race | One invariant lock serializes lookup, creation and activation-link issuance |
+| Library-admin escalation | Generic pending-account provisioning rejects the configured administrative role |
 
 ## Explicit non-goals in 0.4.0
 
@@ -112,5 +116,7 @@
   access, not MFA and not a sole recovery mechanism for administrators, passkeys, Google or MFA.
 - SMTP acceptance does not prove inbox delivery. Durable products need a provider, queue and
   operational delivery monitoring.
+- Email activation proves control of an inbox at AAL1. Products must apply stronger enrollment or
+  recovery controls when an administrator or regulated domain requires them.
 - Deployments behind a proxy must configure trusted proxy addresses in the ASGI server so
   `request.client` is rewritten only for trusted hops.

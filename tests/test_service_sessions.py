@@ -127,6 +127,29 @@ async def test_refresh_rotates_and_preserves_absolute_deadline(
 
 
 @pytest.mark.asyncio
+@pytest.mark.security
+async def test_refresh_rejects_a_pending_account(
+    service: AuthService,
+    store: MemoryAuthStore,
+) -> None:
+    bundle = await create_admin_and_login(service)
+    user = store.users[bundle.principal.user_id]
+    async with store.transaction() as transaction:
+        await transaction.update_user(replace(user, status=UserStatus.PENDING_ACTIVATION))
+
+    with pytest.raises(AuthError) as captured:
+        await service.refresh(
+            bundle.refresh_token,
+            bundle.csrf_token,
+            bundle.csrf_token,
+            origin="http://localhost:3000",
+        )
+
+    assert captured.value.code is AuthErrorCode.INVALID_TOKEN
+    assert store.sessions[bundle.principal.session_id].revoked_at is not None
+
+
+@pytest.mark.asyncio
 async def test_refresh_rejects_unknown_token(service: AuthService) -> None:
     with pytest.raises(AuthError) as captured:
         await service.refresh(

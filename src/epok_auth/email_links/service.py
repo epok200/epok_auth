@@ -1,21 +1,26 @@
 import asyncio
 import secrets
 from dataclasses import replace
-from datetime import datetime, timedelta
-from urllib.parse import quote
-from uuid import UUID, uuid4
+from datetime import datetime
+from uuid import UUID
 
 from epok_auth._events import EMPTY_CONTEXT, record_security_event
 from epok_auth._validation import normalize_email_for_login
 from epok_auth.config import AuthSettings
+from epok_auth.email_links._operations import active_link_exists, consumable_link, issue_link
+from epok_auth.email_links._policy import (
+    can_request,
+    deliverable_link,
+    invalid_email_link,
+    login_nonce,
+    require_email_link_url,
+)
 from epok_auth.email_links.models import (
     AuthEmail,
     AuthEmailKind,
     EmailLink,
     EmailLinkIssue,
     EmailLinkPurpose,
-    EmailLinkState,
-    PendingEmailLink,
 )
 from epok_auth.email_links.store import EmailLinkStore, EmailLinkTransaction
 from epok_auth.errores import AuthError, AuthErrorCode
@@ -24,11 +29,10 @@ from epok_auth.models import (
     SecurityEventType,
     SessionBundle,
     UserAccount,
-    UserStatus,
 )
 from epok_auth.passwords import PasswordManager
 from epok_auth.sessions import SessionIssuer
-from epok_auth.tokens import AccessTokenSigner, Clock, clock_now, token_hash, utc_now
+from epok_auth.tokens import AccessTokenSigner, Clock, clock_now, utc_now
 
 
 class EmailLinkService:
@@ -43,7 +47,7 @@ class EmailLinkService:
         passwords: PasswordManager,
         clock: Clock = utc_now,
     ) -> None:
-        _require_frontend_urls(settings)
+        require_email_link_url(settings)
         self.store = store
         self.settings = settings
         self.passwords = passwords
@@ -57,7 +61,7 @@ class EmailLinkService:
         browser_nonce: str | None = None,
         context: RequestContext = EMPTY_CONTEXT,
     ) -> EmailLinkIssue:
-        browser_nonce = _login_nonce(browser_nonce)
+        browser_nonce = login_nonce(browser_nonce)
         issue = await self._request_for_email(
             email,
             EmailLinkPurpose.LOGIN,
@@ -90,7 +94,7 @@ class EmailLinkService:
             user = await transaction.get_user_by_id(user_id, for_update=True)
             if user is None:
                 raise AuthError(AuthErrorCode.USER_NOT_FOUND, "User not found.")
-            if not self._can_request(user, EmailLinkPurpose.INVITATION, now):
+            if not can_request(self.settings, user, EmailLinkPurpose.INVITATION, now):
                 raise AuthError(
                     AuthErrorCode.FORBIDDEN,
                     "This account is not eligible for email invitation.",
@@ -116,25 +120,26 @@ class EmailLinkService:
                 candidate.user_id,
                 candidate.purpose,
             )
-            if link is None or not self._can_activate(link, latest, user, now):
+            deliverable = deliverable_link(self.settings, link, latest, user, now)
+            if deliverable is None:
                 if link is not None:
                     await transaction.revoke_email_link(link.id, now)
                 return False
-            activated = await transaction.activate_email_link(link.id, now)
+            activated = await transaction.activate_email_link(deliverable.id, now)
             if activated is None:
                 return False
             await transaction.revoke_other_active_email_links(
-                link.user_id,
-                link.purpose,
-                link.id,
+                deliverable.user_id,
+                deliverable.purpose,
+                deliverable.id,
                 now,
             )
             await record_security_event(
                 transaction,
                 SecurityEventType.EMAIL_LINK_DELIVERED,
                 now,
-                user_id=link.user_id,
-                metadata={"purpose": link.purpose.value},
+                user_id=deliverable.user_id,
+                metadata={"purpose": deliverable.purpose.value},
             )
             return True
 
@@ -179,7 +184,11 @@ class EmailLinkService:
                 now,
                 browser_nonce=browser_nonce,
             )
-            if link is None or user is None or not self._can_login(user, now):
+            if (
+                link is None
+                or user is None
+                or not can_request(self.settings, user, EmailLinkPurpose.LOGIN, now)
+            ):
                 await self._login_failure(transaction, user, now, context)
             else:
                 consumed = await transaction.consume_email_link(link.id, link.purpose, now)
@@ -201,7 +210,7 @@ class EmailLinkService:
                         context=context,
                     )
         if result is None:
-            raise _invalid_email_link()
+            raise invalid_email_link()
         return result
 
     async def reset_password(
@@ -214,7 +223,7 @@ class EmailLinkService:
         self.passwords.validate(new_password)
         now = clock_now(self.clock)
         if not await self._active_link_exists(token, EmailLinkPurpose.PASSWORD_RESET, now):
-            raise _invalid_email_link()
+            raise invalid_email_link()
         password_hash = await asyncio.to_thread(self.passwords.hash, new_password)
         notice: AuthEmail | None = None
         async with self.store.transaction() as transaction:
@@ -224,7 +233,11 @@ class EmailLinkService:
                 EmailLinkPurpose.PASSWORD_RESET,
                 now,
             )
-            if link is not None and user is not None and self._can_reset_password(user):
+            if (
+                link is not None
+                and user is not None
+                and can_request(self.settings, user, EmailLinkPurpose.PASSWORD_RESET, now)
+            ):
                 consumed = await transaction.consume_email_link(link.id, link.purpose, now)
                 if consumed is not None:
                     updated = user.activate_password(password_hash, now)
@@ -243,7 +256,7 @@ class EmailLinkService:
                         user_id=user.id,
                     )
         if notice is None:
-            raise _invalid_email_link()
+            raise invalid_email_link()
         return notice
 
     async def activate_invitation(
@@ -254,7 +267,7 @@ class EmailLinkService:
     ) -> UserAccount:
         now = clock_now(self.clock)
         if not await self._active_link_exists(token, EmailLinkPurpose.INVITATION, now):
-            raise _invalid_email_link()
+            raise invalid_email_link()
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
         password_hash = await asyncio.to_thread(self.passwords.hash, unusable_password)
         result: UserAccount | None = None
@@ -265,7 +278,11 @@ class EmailLinkService:
                 EmailLinkPurpose.INVITATION,
                 now,
             )
-            if link is not None and user is not None and self._can_invite(user):
+            if (
+                link is not None
+                and user is not None
+                and can_request(self.settings, user, EmailLinkPurpose.INVITATION, now)
+            ):
                 consumed = await transaction.consume_email_link(link.id, link.purpose, now)
                 if consumed is not None:
                     result = user.activate_email_link_login(password_hash, now)
@@ -279,7 +296,7 @@ class EmailLinkService:
                         context=context,
                     )
         if result is None:
-            raise _invalid_email_link()
+            raise invalid_email_link()
         return result
 
     async def _request_for_email(
@@ -294,7 +311,7 @@ class EmailLinkService:
         normalized_email = normalize_email_for_login(email)
         async with self.store.transaction() as transaction:
             user = await transaction.get_user_by_email(normalized_email, for_update=True)
-            if user is None or not self._can_request(user, purpose, now):
+            if user is None or not can_request(self.settings, user, purpose, now):
                 return EmailLinkIssue()
             return await self._issue(
                 transaction,
@@ -315,48 +332,15 @@ class EmailLinkService:
         now: datetime,
         context: RequestContext,
     ) -> EmailLinkIssue:
-        retention = timedelta(seconds=self.settings.email_link_retention_seconds)
-        await transaction.delete_old_email_links(now - retention)
-        window = timedelta(seconds=self.settings.email_link_request_window_seconds)
-        request_count = await transaction.count_email_link_requests(
-            user.id,
-            purpose,
-            now - window,
-        )
-        if request_count >= self.settings.email_link_max_requests_per_window:
-            return EmailLinkIssue()
-
-        latest = await transaction.get_latest_email_link(user.id, purpose)
-        generation = latest.generation + 1 if latest is not None else 1
-        token = secrets.token_urlsafe(32)
-        link = EmailLink(
-            id=uuid4(),
-            user_id=user.id,
-            purpose=purpose,
-            generation=generation,
-            token_hash=token_hash(token),
-            recipient_hash=token_hash(user.email),
-            browser_hash=token_hash(browser_nonce) if browser_nonce is not None else None,
-            security_version=user.security_version,
-            created_at=now,
-            expires_at=now + timedelta(seconds=self._ttl(purpose)),
-        )
-        await transaction.insert_email_link(link)
-        await record_security_event(
+        return await issue_link(
             transaction,
-            SecurityEventType.EMAIL_LINK_ISSUED,
-            now,
-            user_id=user.id,
+            self.settings,
+            user,
+            purpose,
+            now=now,
             context=context,
-            metadata={"purpose": purpose.value},
+            browser_nonce=browser_nonce,
         )
-        email = AuthEmail(
-            recipient=user.email,
-            kind=AuthEmailKind(purpose.value),
-            action_url=f"{self._frontend_url(purpose)}#token={quote(token, safe='')}",
-            expires_at=link.expires_at,
-        )
-        return EmailLinkIssue(pending=PendingEmailLink(link_id=link.id, email=email))
 
     async def _consumable(
         self,
@@ -367,24 +351,14 @@ class EmailLinkService:
         *,
         browser_nonce: str | None = None,
     ) -> tuple[EmailLink | None, UserAccount | None]:
-        if not token or len(token) > self.settings.email_link_max_token_chars:
-            return None, None
-        candidate = await transaction.get_email_link_by_token_hash(token_hash(token), purpose)
-        if candidate is None:
-            return None, None
-        user = await transaction.get_user_by_id(candidate.user_id, for_update=True)
-        link = await transaction.get_email_link(candidate.id, for_update=True)
-        if link is None or link.state is not EmailLinkState.ACTIVE:
-            return None, user
-        if user is None or not self._matches_user(link, user, now):
-            await transaction.revoke_email_link(link.id, now)
-            return None, user
-        if purpose is EmailLinkPurpose.LOGIN and not self._matches_browser(
-            link,
-            browser_nonce,
-        ):
-            return None, user
-        return link, user
+        return await consumable_link(
+            transaction,
+            self.settings,
+            token,
+            purpose,
+            now,
+            browser_nonce=browser_nonce,
+        )
 
     async def _active_link_exists(
         self,
@@ -392,74 +366,7 @@ class EmailLinkService:
         purpose: EmailLinkPurpose,
         now: datetime,
     ) -> bool:
-        if not token or len(token) > self.settings.email_link_max_token_chars:
-            return False
-        async with self.store.transaction() as transaction:
-            link = await transaction.get_email_link_by_token_hash(token_hash(token), purpose)
-        return link is not None and link.state is EmailLinkState.ACTIVE and link.expires_at > now
-
-    def _matches_user(self, link: EmailLink, user: UserAccount, now: datetime) -> bool:
-        return (
-            link.state is EmailLinkState.ACTIVE
-            and link.expires_at > now
-            and link.security_version == user.security_version
-            and secrets.compare_digest(link.recipient_hash, token_hash(user.email))
-            and self.settings.admin_role not in user.roles
-        )
-
-    @staticmethod
-    def _matches_browser(link: EmailLink, browser_nonce: str | None) -> bool:
-        if link.browser_hash is None or browser_nonce is None:
-            return False
-        return secrets.compare_digest(link.browser_hash, token_hash(browser_nonce))
-
-    def _can_activate(
-        self,
-        link: EmailLink | None,
-        latest: EmailLink | None,
-        user: UserAccount | None,
-        now: datetime,
-    ) -> bool:
-        if link is None or latest is None or user is None:
-            return False
-        return (
-            link.state is EmailLinkState.PENDING
-            and link.id == latest.id
-            and link.expires_at > now
-            and link.security_version == user.security_version
-            and secrets.compare_digest(link.recipient_hash, token_hash(user.email))
-            and self._can_request(user, link.purpose, now)
-        )
-
-    def _can_request(
-        self,
-        user: UserAccount,
-        purpose: EmailLinkPurpose,
-        now: datetime,
-    ) -> bool:
-        if self.settings.admin_role in user.roles:
-            return False
-        if purpose is EmailLinkPurpose.LOGIN:
-            return self._can_login(user, now)
-        if purpose is EmailLinkPurpose.PASSWORD_RESET:
-            return self._can_reset_password(user)
-        return self._can_invite(user)
-
-    @staticmethod
-    def _can_login(user: UserAccount, now: datetime) -> bool:
-        return (
-            user.can_authenticate(now)
-            and user.email_link_login_enabled
-            and not user.must_change_password
-        )
-
-    @staticmethod
-    def _can_reset_password(user: UserAccount) -> bool:
-        return user.status is UserStatus.ACTIVE and user.password_login_enabled
-
-    @staticmethod
-    def _can_invite(user: UserAccount) -> bool:
-        return user.status is UserStatus.ACTIVE and user.must_change_password
+        return await active_link_exists(self.store, self.settings, token, purpose, now)
 
     async def _login_failure(
         self,
@@ -475,46 +382,3 @@ class EmailLinkService:
             user_id=user.id if user is not None else None,
             context=context,
         )
-
-    def _frontend_url(self, purpose: EmailLinkPurpose) -> str:
-        if purpose is EmailLinkPurpose.LOGIN:
-            url = self.settings.email_link_login_url
-        elif purpose is EmailLinkPurpose.PASSWORD_RESET:
-            url = self.settings.email_link_password_reset_url
-        else:
-            url = self.settings.email_link_invitation_url
-        if url is None:  # pragma: no cover
-            raise RuntimeError("email link frontend URLs are not configured")
-        return url
-
-    def _ttl(self, purpose: EmailLinkPurpose) -> int:
-        if purpose is EmailLinkPurpose.LOGIN:
-            return self.settings.email_link_login_ttl_seconds
-        if purpose is EmailLinkPurpose.PASSWORD_RESET:
-            return self.settings.email_link_password_reset_ttl_seconds
-        return self.settings.email_link_invitation_ttl_seconds
-
-
-def _require_frontend_urls(settings: AuthSettings) -> None:
-    if not all(
-        (
-            settings.email_link_login_url,
-            settings.email_link_password_reset_url,
-            settings.email_link_invitation_url,
-        )
-    ):
-        raise ValueError("email link frontend URLs are required when email links are enabled")
-
-
-def _login_nonce(existing: str | None) -> str:
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
-    if existing and len(existing) == 43 and all(character in allowed for character in existing):
-        return existing
-    return secrets.token_urlsafe(32)
-
-
-def _invalid_email_link() -> AuthError:
-    return AuthError(
-        AuthErrorCode.EMAIL_LINK_INVALID,
-        "The email link is invalid or expired.",
-    )

@@ -78,6 +78,10 @@ product deployment still requires the controls listed at the end of this documen
 | SMTP delivery | TLS modes, credential redaction, rendering and safe provider errors are tested | `tests/email_links/test_smtp.py` |
 | Durable email dispatch | Production requires an injected queue, links stay pending until worker delivery and queue failures preserve generic responses | dispatcher and artifact smoke tests |
 | Security fencing | Credential, permission, Google and passkey changes invalidate previously issued links | cross-feature service tests |
+| Pending account isolation | Password, refresh, Google and Passkeys reject the account until the shared activation transition completes | `tests/email_links/test_account_activation.py`, `tests/test_service_sessions.py`, `tests/google/test_service_modes.py`, `tests/passkeys/test_service.py` |
+| First-password activation | The delivered link is single-use, sets the first password, revokes sessions and does not issue a session | account activation unit and PostgreSQL tests |
+| Initial administrator bootstrap | Concurrent calls create one pending administrator and one activation link under the existing admin invariant lock | memory and PostgreSQL concurrency tests |
+| Reserved administrator role | Generic account activation cannot assign the configured library administrator role | account activation policy tests |
 | Last administrator | Concurrent operations cannot remove the final active admin | memory and PostgreSQL invariant tests |
 | Secret redaction | Validation and auth responses do not echo submitted secrets | HTTP and CLI tests |
 | Audit IP integrity | Direct clients cannot spoof event IPs with forwarding headers | HTTP abuse tests |

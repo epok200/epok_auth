@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from epok_auth.errores import AuthError, AuthErrorCode
-from epok_auth.models import Principal, SecurityEventType, SessionBundle
+from epok_auth.models import Principal, SecurityEventType, SessionBundle, UserStatus
 from epok_auth.passkeys.service import PasskeyService
 from epok_auth.service import AuthService
 from epok_auth.testing import MemoryAuthStore
@@ -209,6 +209,33 @@ async def test_passkey_authentication_issues_authoritative_session(
     assert store.passkeys[credential.id].last_used_at == clock.value
     assert session.principal.authenticated_at == clock.value
     assert SecurityEventType.PASSKEY_LOGIN_SUCCEEDED in {event.event_type for event in store.events}
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_passkey_authentication_rejects_a_pending_account(
+    store: MemoryAuthStore,
+    settings,
+    clock: MutableClock,
+) -> None:
+    _, passkeys, bundle = await ready_services(store, settings, clock)
+    _, credential = await register_passkey(passkeys, bundle.principal)
+    user = store.users[bundle.principal.user_id]
+    async with store.transaction() as transaction:
+        await transaction.update_user(replace(user, status=UserStatus.PENDING_ACTIVATION))
+    existing_sessions = len(store.sessions)
+    options = await passkeys.begin_authentication(ORIGIN)
+
+    with pytest.raises(AuthError) as captured:
+        await passkeys.finish_authentication(
+            options.ceremony_id,
+            {"credential_id": credential.credential_id, "valid": True, "sign_count": 1},
+            ORIGIN,
+        )
+
+    assert captured.value.code is AuthErrorCode.PASSKEY_AUTHENTICATION_INVALID
+    assert len(store.sessions) == existing_sessions
+    assert SecurityEventType.PASSKEY_LOGIN_FAILED in {event.event_type for event in store.events}
 
 
 @pytest.mark.asyncio

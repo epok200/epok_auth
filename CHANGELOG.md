@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- add pending accounts that cannot use password, refresh, Google or Passkeys before activation;
+- add single-use first-password activation through the existing email-link store and delivery
+  contract;
+- expose an atomic, idempotent initial-administrator bootstrap without coupling startup or email
+  infrastructure;
+- preserve one account, role, session and security-event model across every authentication method.
+
 ## 0.5.0 - 2026-08-30
 
 - expose the FastAPI transport and session schemas for product-owned routers;
