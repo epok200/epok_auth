@@ -92,10 +92,15 @@ class AuthHttpTransport:
 
     @staticmethod
     def request_context(request: Request) -> RequestContext:
+        request_id = getattr(request.state, "request_id", None) or request.headers.get(
+            "x-request-id"
+        )
+        if request_id is not None:
+            request_id = str(request_id)
+
         ip_address = request.client.host if request.client is not None else None
         return RequestContext(
-            request_id=getattr(request.state, "request_id", None)
-            or request.headers.get("x-request-id"),
+            request_id=request_id,
             ip_address=ip_address,
             user_agent=request.headers.get("user-agent"),
         )

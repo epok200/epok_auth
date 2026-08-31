@@ -463,6 +463,32 @@ app.include_router(auth.router(prefix="/api/v1/auth"))
 
 El uso manual no instala por sí solo los manejadores de errores. Usa `install()` salvo que necesites controlar el montaje directamente.
 
+### Routers propios del producto
+
+Un producto con su propia envoltura JSON puede construir routers delgados sin importar módulos
+internos:
+
+```python
+from epok_auth.fastapi import (
+    AuthHttpTransport,
+    ChangePasswordRequest,
+    LoginRequest,
+    PrincipalResponse,
+    SessionResponse,
+)
+
+transport: AuthHttpTransport = auth.http
+service = auth.service
+```
+
+`auth.http` conserva la responsabilidad sobre cookies, anti-cache y `RequestContext`. `auth.service`
+conserva las reglas de cuentas y sesiones. El producto puede envolver los DTO publicados, pero no debe
+copiar esas reglas ni importar factories privadas. `auth.install()` y los routers existentes mantienen
+su comportamiento actual.
+
+`auth.current_user`, `auth.authenticated`, `auth.require_roles()`, `auth.require_scopes()` y
+`auth.require_recent_authentication()` son dependencias públicas estables para routers propios.
+
 ### `auth.admin_router(prefix=...)`
 
 Devuelve el router administrativo protegido por el rol configurado como administrador.

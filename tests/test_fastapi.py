@@ -233,6 +233,7 @@ async def test_install_exposes_secure_contract_and_authenticates(settings: AuthS
         assert forbidden.json()["code"] == "AUTH_FORBIDDEN"
 
     assert auth.settings is settings
+    assert auth.http.settings is settings
 
 
 @pytest.mark.asyncio

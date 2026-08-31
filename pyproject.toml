@@ -1,6 +1,6 @@
 [project]
 name = "epok-auth"
-version = "0.4.1"
+version = "0.5.0"
 description = "FastAPI authentication with revocable sessions, passkeys, Google and Magic Links."
 readme = "README.md"
 requires-python = ">=3.12"
