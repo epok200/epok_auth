@@ -1,6 +1,6 @@
 [project]
 name = "epok-auth"
-version = "0.6.0"
+version = "0.7.0"
 description = "FastAPI authentication with revocable sessions, passkeys, Google and Magic Links."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -130,6 +130,7 @@ ignore = ["PLR0913", "PLR2004", "S101"]
 "tests/**/*.py" = ["B008", "PLC0415", "S105", "S106", "S107", "PLR2004"]
 "tests/test_errors.py" = ["S301", "S403"]
 "tests/test_postgres_integration.py" = ["E402"]
+"tests/test_reauthentication_postgres_integration.py" = ["E402"]
 "tests/test_google_postgres_integration.py" = ["E402"]
 "tests/test_migration_isolation_integration.py" = ["E402"]
 "tests/test_tokens.py" = ["DTZ001"]

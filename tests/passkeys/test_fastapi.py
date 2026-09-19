@@ -27,6 +27,7 @@ async def passkey_client(settings):
     )
     app = FastAPI()
     auth.install(app, prefix=PREFIX, include_passkeys=True)
+    assert auth.passkey_service is auth.passkeys
     transport = httpx.ASGITransport(app=app)
     client = httpx.AsyncClient(transport=transport, base_url="http://testserver")
     return auth, app, client, VirtualAuthenticator()

@@ -197,12 +197,13 @@ passkey_challenge = Table(
         Uuid(as_uuid=True),
         ForeignKey("user_account.id", ondelete="CASCADE"),
     ),
+    Column("family_id", Uuid(as_uuid=True)),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("consumed_at", DateTime(timezone=True)),
     UniqueConstraint("challenge", name="uq_epok_auth_passkey_challenge"),
     CheckConstraint(
-        "purpose IN ('registration', 'authentication')",
+        "purpose IN ('registration', 'authentication', 'reauthentication')",
         name="ck_epok_auth_passkey_challenge_purpose",
     ),
     CheckConstraint(
@@ -218,8 +219,9 @@ passkey_challenge = Table(
         name="ck_epok_auth_passkey_challenge_times",
     ),
     CheckConstraint(
-        "(purpose = 'registration' AND user_id IS NOT NULL) OR "
-        "(purpose = 'authentication' AND user_id IS NULL)",
+        "(purpose = 'registration' AND user_id IS NOT NULL AND family_id IS NULL) OR "
+        "(purpose = 'authentication' AND user_id IS NULL AND family_id IS NULL) OR "
+        "(purpose = 'reauthentication' AND user_id IS NOT NULL AND family_id IS NOT NULL)",
         name="ck_epok_auth_passkey_challenge_user",
     ),
     Index("ix_epok_auth_passkey_challenge_expiry", "expires_at"),

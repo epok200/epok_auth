@@ -13,16 +13,18 @@ from epok_auth.config import AuthSettings
 from epok_auth.errores import AuthError, AuthErrorCode, forbidden, invalid_session
 from epok_auth.models import (
     Principal,
+    Reauthentication,
+    ReauthenticationMethod,
     RequestContext,
     SecurityEventType,
     SessionBundle,
     UserAccount,
 )
+from epok_auth.passkeys._authentication import verify_and_update_passkey
 from epok_auth.passkeys.adapter import (
     CredentialPayload,
     PasskeyAdapter,
     PasskeyVerificationError,
-    VerifiedPasskeyAuthentication,
 )
 from epok_auth.passkeys.models import (
     PasskeyCeremonyPurpose,
@@ -31,7 +33,11 @@ from epok_auth.passkeys.models import (
     PasskeyOptions,
 )
 from epok_auth.passkeys.store import PasskeyStore
-from epok_auth.sessions import SessionIssuer
+from epok_auth.sessions import (
+    SessionIssuer,
+    require_principal_session,
+    require_principal_user,
+)
 from epok_auth.store import StoreConflictError
 from epok_auth.tokens import (
     AccessTokenSigner,
@@ -110,6 +116,7 @@ class PasskeyService:
             PasskeyCeremonyPurpose.REGISTRATION,
             now,
             principal.user_id,
+            None,
         )
         if challenge.origin != expected_origin:
             await self._registration_failure(principal.user_id, now, context)
@@ -190,6 +197,27 @@ class PasskeyService:
             await transaction.insert_passkey_challenge(challenge)
         return PasskeyOptions(ceremony_id=challenge.id, public_key=options)
 
+    async def begin_reauthentication(
+        self,
+        principal: Principal,
+        origin: str | None,
+    ) -> PasskeyOptions:
+        now = clock_now(self.clock)
+        expected_origin = self._validate_origin(origin)
+        async with self.store.transaction() as transaction:
+            await require_principal_user(transaction, principal, now)
+            challenge = self._challenge(
+                PasskeyCeremonyPurpose.REAUTHENTICATION,
+                expected_origin,
+                now,
+                user_id=principal.user_id,
+                family_id=principal.family_id,
+            )
+            options = self.adapter.authentication_options(challenge.challenge)
+            await transaction.delete_expired_passkey_challenges(now)
+            await transaction.insert_passkey_challenge(challenge)
+        return PasskeyOptions(ceremony_id=challenge.id, public_key=options)
+
     async def finish_authentication(
         self,
         ceremony_id: UUID,
@@ -205,68 +233,44 @@ class PasskeyService:
             PasskeyCeremonyPurpose.AUTHENTICATION,
             now,
             None,
+            None,
         )
         if challenge.origin != expected_origin:
             await self._authentication_failure(None, now, context)
             raise _invalid_challenge()
-        try:
-            credential_id = self.adapter.credential_id(credential)
-        except PasskeyVerificationError as error:
-            await self._authentication_failure(None, now, context)
-            raise _invalid_authentication() from error
-
         failure: AuthError | None = None
         result: SessionBundle | None = None
         async with self.store.transaction() as transaction:
-            stored = await transaction.get_passkey_by_credential_id(
-                credential_id,
-                for_update=True,
+            verification = await verify_and_update_passkey(
+                transaction,
+                self.adapter,
+                credential=credential,
+                challenge=challenge.challenge,
+                origin=expected_origin,
+                now=now,
             )
-            user = None
-            if stored is not None and stored.revoked_at is None:
-                user = await transaction.get_user_by_id(stored.user_id, for_update=True)
-            if stored is None or stored.revoked_at is not None or not _can_authenticate(user, now):
+            user = verification.user
+            passkey = verification.credential
+            if passkey is None:
                 failure = _invalid_authentication()
             else:
-                verified = await self._verify_authentication(
-                    credential,
-                    challenge.challenge,
-                    expected_origin,
-                    stored,
+                if user is None:  # pragma: no cover
+                    raise RuntimeError("verified passkey has no user")
+                result = await self.session_issuer.issue(
+                    transaction,
+                    user,
+                    now=now,
+                    context=context,
                 )
-                if verified is None:
-                    failure = _invalid_authentication()
-                else:
-                    credential_changed = (
-                        verified.credential_id != stored.credential_id
-                        or verified.device_type != stored.device_type
-                    )
-                    if credential_changed:
-                        failure = _invalid_authentication()
-                    else:
-                        await transaction.update_passkey(
-                            replace(
-                                stored,
-                                sign_count=verified.sign_count,
-                                backed_up=verified.backed_up,
-                                last_used_at=now,
-                            )
-                        )
-                        result = await self.session_issuer.issue(
-                            transaction,
-                            user,
-                            now=now,
-                            context=context,
-                        )
-                        await record_security_event(
-                            transaction,
-                            SecurityEventType.PASSKEY_LOGIN_SUCCEEDED,
-                            now,
-                            context,
-                            user_id=user.id,
-                            session_id=result.principal.session_id,
-                            metadata={"passkey_id": str(stored.id)},
-                        )
+                await record_security_event(
+                    transaction,
+                    SecurityEventType.PASSKEY_LOGIN_SUCCEEDED,
+                    now,
+                    context,
+                    user_id=user.id,
+                    session_id=result.principal.session_id,
+                    metadata={"passkey_id": str(passkey.id)},
+                )
             if failure is not None:
                 await record_security_event(
                     transaction,
@@ -279,6 +283,89 @@ class PasskeyService:
             raise failure
         if result is None:  # pragma: no cover
             raise RuntimeError("passkey authentication completed without a result")
+        return result
+
+    async def finish_reauthentication(
+        self,
+        principal: Principal,
+        ceremony_id: UUID,
+        credential: CredentialPayload,
+        origin: str | None,
+        *,
+        context: RequestContext = EMPTY_CONTEXT,
+    ) -> Reauthentication:
+        now = clock_now(self.clock)
+        expected_origin = self._validate_origin(origin)
+        try:
+            challenge = await self._consume_challenge(
+                ceremony_id,
+                PasskeyCeremonyPurpose.REAUTHENTICATION,
+                now,
+                principal.user_id,
+                principal.family_id,
+            )
+        except AuthError:
+            await self._reauthentication_failure(principal, now, context)
+            raise
+        if challenge.origin != expected_origin:
+            await self._reauthentication_failure(principal, now, context)
+            raise _invalid_challenge()
+
+        failure: AuthError | None = None
+        result: Reauthentication | None = None
+        async with self.store.transaction() as transaction:
+            verification = await verify_and_update_passkey(
+                transaction,
+                self.adapter,
+                credential=credential,
+                challenge=challenge.challenge,
+                origin=expected_origin,
+                now=now,
+                expected_user_id=principal.user_id,
+            )
+            passkey = verification.credential
+            if passkey is None:
+                await record_security_event(
+                    transaction,
+                    SecurityEventType.REAUTHENTICATION_FAILED,
+                    now,
+                    context,
+                    user_id=principal.user_id,
+                    session_id=principal.session_id,
+                    metadata={"method": ReauthenticationMethod.PASSKEY.value},
+                )
+                failure = _invalid_authentication()
+            else:
+                await require_principal_session(
+                    transaction,
+                    principal,
+                    verification.user,
+                    now,
+                    for_update=True,
+                )
+                result = Reauthentication(
+                    user_id=principal.user_id,
+                    session_id=principal.session_id,
+                    family_id=principal.family_id,
+                    method=ReauthenticationMethod.PASSKEY,
+                    verified_at=now,
+                )
+                await record_security_event(
+                    transaction,
+                    SecurityEventType.REAUTHENTICATION_SUCCEEDED,
+                    now,
+                    context,
+                    user_id=principal.user_id,
+                    session_id=principal.session_id,
+                    metadata={
+                        "method": ReauthenticationMethod.PASSKEY.value,
+                        "passkey_id": str(passkey.id),
+                    },
+                )
+        if failure is not None:
+            raise failure
+        if result is None:  # pragma: no cover
+            raise RuntimeError("passkey reauthentication completed without a result")
         return result
 
     async def list_passkeys(self, principal: Principal) -> Sequence[PasskeyCredential]:
@@ -324,6 +411,7 @@ class PasskeyService:
         purpose: PasskeyCeremonyPurpose,
         now: datetime,
         user_id: UUID | None,
+        family_id: UUID | None,
     ) -> PasskeyChallenge:
         async with self.store.transaction() as transaction:
             challenge = await transaction.consume_passkey_challenge(
@@ -331,6 +419,7 @@ class PasskeyService:
                 purpose,
                 now,
                 user_id,
+                family_id,
             )
         if challenge is None:
             raise _invalid_challenge()
@@ -366,23 +455,22 @@ class PasskeyService:
                 user_id=user_id,
             )
 
-    async def _verify_authentication(
+    async def _reauthentication_failure(
         self,
-        credential: CredentialPayload,
-        challenge: bytes,
-        origin: str,
-        stored: PasskeyCredential,
-    ) -> VerifiedPasskeyAuthentication | None:
-        try:
-            return await asyncio.to_thread(
-                self.adapter.verify_authentication,
-                credential,
-                challenge,
-                origin,
-                stored,
+        principal: Principal,
+        now: datetime,
+        context: RequestContext,
+    ) -> None:
+        async with self.store.transaction() as transaction:
+            await record_security_event(
+                transaction,
+                SecurityEventType.REAUTHENTICATION_FAILED,
+                now,
+                context,
+                user_id=principal.user_id,
+                session_id=principal.session_id,
+                metadata={"method": ReauthenticationMethod.PASSKEY.value},
             )
-        except PasskeyVerificationError:
-            return None
 
     def _challenge(
         self,
@@ -391,6 +479,7 @@ class PasskeyService:
         now: datetime,
         *,
         user_id: UUID | None = None,
+        family_id: UUID | None = None,
     ) -> PasskeyChallenge:
         return PasskeyChallenge(
             id=uuid4(),
@@ -400,6 +489,7 @@ class PasskeyService:
             created_at=now,
             expires_at=now + timedelta(seconds=self.settings.passkey_challenge_ttl_seconds),
             user_id=user_id,
+            family_id=family_id,
         )
 
     def _validate_origin(self, origin: str | None) -> str:

@@ -1,7 +1,7 @@
 # Passkeys con WebAuthn
 
-`epok-auth` incluye registro, inicio de sesión sin username, listado y revocación de
-passkeys. El backend delega la validación criptográfica WebAuthn a `py_webauthn` y
+`epok-auth` incluye registro, inicio de sesión sin username, reautenticación, listado y
+revocación de passkeys. El backend delega la validación criptográfica WebAuthn a `py_webauthn` y
 mantiene en la librería la política de sesiones, challenges, usuarios y auditoría.
 
 ## Estándar y dependencia
@@ -22,7 +22,7 @@ actualización mayor puede revisarse sin cambiar el dominio, los stores ni la AP
 Instala PostgreSQL y passkeys con un solo comando:
 
 ```bash
-uv add "epok-auth[postgres,passkeys]==0.4.0"
+uv add "epok-auth[postgres,passkeys]==0.7.0"
 ```
 
 Para validar el código fuente desde este repositorio, usa el wheel o sdist generado por
@@ -88,6 +88,29 @@ PostgreSQL, no contiene credenciales reales y pierde su estado al detener el pro
 Una passkey guardada por Chrome puede permanecer en el navegador después de reiniciar el
 sandbox; crea una nueva para la siguiente sesión de prueba.
 
+## Reautenticación dentro de una acción sensible
+
+La reautenticación no instala una ruta genérica ni entrega un token al navegador. El router del
+producto inicia la ceremonia con el `Principal` actual y consume el resultado dentro del endpoint
+que emite su propia confirmación de corta duración:
+
+```python
+options = await auth.passkey_service.begin_reauthentication(principal, origin)
+
+proof = await auth.passkey_service.finish_reauthentication(
+    principal,
+    ceremony_id,
+    credential,
+    origin,
+    context=auth.http.request_context(request),
+)
+confirmation = await confirmations.issue(proof, sensitive_action)
+```
+
+El challenge queda ligado a `user_id` y `family_id`. Un refresh legítimo puede terminar la
+ceremonia porque conserva la familia, pero otra sesión del mismo usuario no puede sustituirla.
+La aplicación consumidora persiste y consume su confirmación de forma atómica junto con la acción.
+
 ## API disponible
 
 | Método | Ruta | Autenticación | Propósito |
@@ -144,6 +167,7 @@ pertenece a cada producto.
 ## Controles implementados
 
 - challenge aleatorio de 32 bytes, temporal, ligado a ceremonia y origen;
+- challenge de reautenticación ligado al usuario y a la familia de sesión actuales;
 - consumo atómico de un solo uso antes de validar la respuesta;
 - rechazo de replay, challenge vencido, `crossOrigin` y `topOrigin`;
 - validación exacta de Origin y compatibilidad con RP ID;
@@ -153,13 +177,13 @@ pertenece a cada producto.
 - credential ID único y con máximo de 1023 bytes;
 - validación de firma, RP ID hash, contador y elegibilidad de backup;
 - múltiples passkeys, nombre amigable, última utilización y revocación;
-- eventos de registro, fallo, login y revocación;
+- eventos de registro, fallo, login, reautenticación y revocación;
 - PostgreSQL autoritativo y soporte de almacenamiento en memoria solo para pruebas.
 
 La atestación usa `none` de forma intencional. Esto mantiene interoperabilidad y evita
-convertir la librería en un sistema de confianza de fabricantes. La autenticación con
-passkey es una alternativa resistente al phishing, no una política MFA o step-up por sí
-sola.
+convertir la librería en un sistema de confianza de fabricantes. Una passkey es una vía
+resistente al phishing. La librería puede volver a verificarla, pero el producto sigue siendo
+responsable de decidir qué acción exige esa prueba.
 
 ## Operación segura
 
@@ -169,7 +193,8 @@ sola.
 - Aplica rate limiting en el edge a las dos rutas públicas de autenticación.
 - Conserva al menos otra vía de acceso o un proceso de recuperación antes de revocar la
   última passkey de una cuenta sin contraseña operable.
-- Monitorea los eventos `PASSKEY_LOGIN_FAILED` y `PASSKEY_REGISTRATION_FAILED`.
+- Monitorea `PASSKEY_LOGIN_FAILED`, `PASSKEY_REGISTRATION_FAILED` y
+  `REAUTHENTICATION_FAILED`.
 - Ejecuta `upgrade-db` durante el despliegue antes de servir la versión nueva.
 
 Revocar una passkey impide nuevas autenticaciones con esa credencial, pero no termina
@@ -180,3 +205,6 @@ HTTP automatizado conserva este contrato y comprueba ambos comportamientos por s
 La migración `0002_passkeys` es reversible. Un downgrade elimina credenciales y
 challenges WebAuthn, por lo que debe tratarse como pérdida de factores y requiere una
 copia de seguridad si se piensa restaurar la versión nueva.
+
+La migración `0006_passkey_reauthentication` agrega la familia a los challenges. Su downgrade
+elimina únicamente ceremonias de reautenticación en curso antes de restaurar el contrato anterior.

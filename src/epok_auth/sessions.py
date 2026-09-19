@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 from epok_auth._events import EMPTY_CONTEXT, record_security_event
 from epok_auth.config import AuthSettings
+from epok_auth.errores import invalid_session
 from epok_auth.models import (
     Principal,
     RefreshSession,
@@ -95,3 +96,41 @@ def principal_from_session(user: UserAccount, session: RefreshSession) -> Princi
         must_change_password=user.must_change_password,
         authenticated_at=session.authenticated_at,
     )
+
+
+async def require_principal_user(
+    transaction: AuthTransaction,
+    principal: Principal,
+    now: datetime,
+    *,
+    for_update: bool = False,
+) -> UserAccount:
+    user = await transaction.get_user_by_id(principal.user_id, for_update=for_update)
+    await require_principal_session(
+        transaction,
+        principal,
+        user,
+        now,
+        for_update=for_update,
+    )
+    if user is None:  # pragma: no cover
+        raise invalid_session()
+    return user
+
+
+async def require_principal_session(
+    transaction: AuthTransaction,
+    principal: Principal,
+    user: UserAccount | None,
+    now: datetime,
+    *,
+    for_update: bool = False,
+) -> None:
+    session = await transaction.get_session_by_id(principal.session_id, for_update=for_update)
+    if (
+        user is None
+        or session is None
+        or not user.can_authenticate(now)
+        or not session.is_valid_for(principal, now)
+    ):
+        raise invalid_session()

@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
+from uuid import UUID
 
 from epok_auth._events import EMPTY_CONTEXT, record_security_event
 from epok_auth._service_base import AuthServiceBase
@@ -19,12 +20,17 @@ from epok_auth.errores import (
 )
 from epok_auth.models import (
     Principal,
+    Reauthentication,
+    ReauthenticationMethod,
     RequestContext,
     SecurityEventType,
+    SecurityMetadata,
     SessionBundle,
-    UserStatus,
+    UserAccount,
 )
-from epok_auth.sessions import principal_from_session
+from epok_auth.passwords import PasswordVerification
+from epok_auth.sessions import principal_from_session, require_principal_user
+from epok_auth.store import AuthTransaction
 from epok_auth.tokens import clock_now, secure_token_equals, token_hash
 
 
@@ -51,56 +57,23 @@ class SessionServiceMethods(AuthServiceBase):
                 user is None or not user.password_login_enabled or not user.can_authenticate(now)
             )
             if unavailable or not verification.valid:
-                if user is not None and user.password_login_enabled and user.can_authenticate(now):
-                    previous_attempts = (
-                        0
-                        if user.locked_until and user.locked_until <= now
-                        else user.failed_login_attempts
-                    )
-                    attempts = previous_attempts + 1
-                    locked_until = (
-                        now + timedelta(seconds=self.settings.lockout_seconds)
-                        if attempts >= self.settings.login_max_attempts
-                        else None
-                    )
-                    user = replace(
-                        user,
-                        failed_login_attempts=attempts,
-                        locked_until=locked_until,
-                        updated_at=now,
-                    )
-                    if locked_until is not None:
-                        user = user.advance_security_version(now)
-                    await transaction.update_user(user)
-                    if locked_until is not None:
-                        await transaction.revoke_user_sessions(user.id, revoked_at=now)
-                        await record_security_event(
-                            transaction,
-                            SecurityEventType.ACCOUNT_LOCKED,
-                            now=now,
-                            user_id=user.id,
-                            context=context,
-                        )
-                await record_security_event(
+                await self._record_password_failure(
                     transaction,
                     SecurityEventType.LOGIN_FAILED,
-                    now=now,
-                    user_id=user.id if user else None,
-                    context=context,
+                    user,
+                    now,
+                    context,
                 )
                 failure = invalid_credentials()
             else:
                 if user is None:
                     raise invalid_credentials()
-                updated_hash = verification.updated_hash or user.password_hash
-                user = replace(
+                user = await self._apply_password_verification(
+                    transaction,
                     user,
-                    password_hash=updated_hash,
-                    failed_login_attempts=0,
-                    locked_until=None,
-                    updated_at=now,
+                    verification,
+                    now,
                 )
-                await transaction.update_user(user)
                 result = await self.session_issuer.issue(
                     transaction,
                     user,
@@ -119,6 +92,58 @@ class SessionServiceMethods(AuthServiceBase):
             raise failure
         if result is None:  # pragma: no cover
             raise RuntimeError("login completed without a result")
+        return result
+
+    async def reauthenticate_password(
+        self,
+        principal: Principal,
+        password: str,
+        *,
+        context: RequestContext = EMPTY_CONTEXT,
+    ) -> Reauthentication:
+        now = clock_now(self.clock)
+        failure: AuthError | None = None
+        result: Reauthentication | None = None
+        async with self.store.transaction() as transaction:
+            user = await require_principal_user(transaction, principal, now, for_update=True)
+            verification = await asyncio.to_thread(
+                self.passwords.verify_for_login,
+                password,
+                user.password_hash if user.password_login_enabled else None,
+            )
+            if not user.password_login_enabled or not verification.valid:
+                await self._record_password_failure(
+                    transaction,
+                    SecurityEventType.REAUTHENTICATION_FAILED,
+                    user,
+                    now,
+                    context,
+                    session_id=principal.session_id,
+                    method=ReauthenticationMethod.PASSWORD,
+                )
+                failure = invalid_credentials()
+            else:
+                await self._apply_password_verification(transaction, user, verification, now)
+                result = Reauthentication(
+                    user_id=principal.user_id,
+                    session_id=principal.session_id,
+                    family_id=principal.family_id,
+                    method=ReauthenticationMethod.PASSWORD,
+                    verified_at=now,
+                )
+                await record_security_event(
+                    transaction,
+                    SecurityEventType.REAUTHENTICATION_SUCCEEDED,
+                    now,
+                    context,
+                    user_id=principal.user_id,
+                    session_id=principal.session_id,
+                    metadata={"method": ReauthenticationMethod.PASSWORD.value},
+                )
+        if failure is not None:
+            raise failure
+        if result is None:  # pragma: no cover
+            raise RuntimeError("password reauthentication completed without a result")
         return result
 
     async def authenticate(self, access_token: str) -> Principal:
@@ -228,12 +253,16 @@ class SessionServiceMethods(AuthServiceBase):
             return 0
         self.validate_csrf_pair(csrf_cookie or "", csrf_header or "")
         now = clock_now(self.clock)
+        refresh_hash = token_hash(refresh_token)
         async with self.store.transaction() as transaction:
-            session = await transaction.get_session_by_token_hash(
-                token_hash(refresh_token),
-                for_update=True,
-            )
-            if session is None or session.revoked_at is not None:
+            candidate = await transaction.get_session_by_token_hash(refresh_hash)
+            if candidate is None or candidate.revoked_at is not None:
+                return 0
+            user = await transaction.get_user_by_id(candidate.user_id, for_update=True)
+            session = await transaction.get_session_by_id(candidate.id, for_update=True)
+            if user is None or session is None or session.revoked_at is not None:
+                return 0
+            if not secure_token_equals(session.token_hash, refresh_hash):
                 return 0
             if not secure_token_equals(session.csrf_hash, token_hash(csrf_cookie or "")):
                 raise invalid_csrf()
@@ -259,15 +288,7 @@ class SessionServiceMethods(AuthServiceBase):
         self.passwords.validate(new_password)
         now = clock_now(self.clock)
         async with self.store.transaction() as transaction:
-            user = await transaction.get_user_by_id(principal.user_id, for_update=True)
-            session = await transaction.get_session_by_id(principal.session_id, for_update=True)
-            if (
-                user is None
-                or session is None
-                or user.status is not UserStatus.ACTIVE
-                or not session.is_valid_for(principal, now)
-            ):
-                raise invalid_session()
+            user = await require_principal_user(transaction, principal, now, for_update=True)
             verification = await asyncio.to_thread(
                 self.passwords.verify,
                 current_password,
@@ -305,6 +326,75 @@ class SessionServiceMethods(AuthServiceBase):
                 context=context,
             )
             return result
+
+    async def _record_password_failure(
+        self,
+        transaction: AuthTransaction,
+        event_type: SecurityEventType,
+        user: UserAccount | None,
+        now: datetime,
+        context: RequestContext,
+        *,
+        session_id: UUID | None = None,
+        method: ReauthenticationMethod | None = None,
+    ) -> None:
+        if user is not None and user.password_login_enabled and user.can_authenticate(now):
+            previous_attempts = (
+                0 if user.locked_until and user.locked_until <= now else user.failed_login_attempts
+            )
+            attempts = previous_attempts + 1
+            locked_until = (
+                now + timedelta(seconds=self.settings.lockout_seconds)
+                if attempts >= self.settings.login_max_attempts
+                else None
+            )
+            user = replace(
+                user,
+                failed_login_attempts=attempts,
+                locked_until=locked_until,
+                updated_at=now,
+            )
+            if locked_until is not None:
+                user = user.advance_security_version(now)
+            await transaction.update_user(user)
+            if locked_until is not None:
+                await transaction.revoke_user_sessions(user.id, revoked_at=now)
+                await record_security_event(
+                    transaction,
+                    SecurityEventType.ACCOUNT_LOCKED,
+                    now,
+                    context,
+                    user_id=user.id,
+                )
+        metadata: SecurityMetadata | None = None
+        if method is not None:
+            metadata = {"method": method.value}
+        await record_security_event(
+            transaction,
+            event_type,
+            now,
+            context,
+            user_id=user.id if user is not None else None,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    async def _apply_password_verification(
+        transaction: AuthTransaction,
+        user: UserAccount,
+        verification: PasswordVerification,
+        now: datetime,
+    ) -> UserAccount:
+        updated = replace(
+            user,
+            password_hash=verification.updated_hash or user.password_hash,
+            failed_login_attempts=0,
+            locked_until=None,
+            updated_at=now,
+        )
+        await transaction.update_user(updated)
+        return updated
 
     def validate_csrf_pair(self, cookie: str, header: str) -> None:
         if not cookie or not header or not secure_token_equals(cookie, header):

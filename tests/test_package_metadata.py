@@ -1,6 +1,7 @@
 from importlib.metadata import version
 
 import epok_auth
+from epok_auth import Reauthentication, ReauthenticationMethod
 from epok_auth.fastapi import (
     AuthHttpTransport,
     ChangePasswordRequest,
@@ -15,6 +16,8 @@ def test_runtime_version_matches_distribution_metadata() -> None:
 
 
 def test_product_router_contracts_are_public() -> None:
+    assert Reauthentication.__module__ == "epok_auth.models"
+    assert ReauthenticationMethod.__module__ == "epok_auth.models"
     assert AuthHttpTransport.__module__ == "epok_auth.fastapi.transport"
     assert LoginRequest.__module__ == "epok_auth.fastapi.schemas"
     assert ChangePasswordRequest.__module__ == "epok_auth.fastapi.schemas"
