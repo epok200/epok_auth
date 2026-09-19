@@ -342,7 +342,10 @@ def _base_check_code() -> str:
             "from importlib.util import find_spec",
             "import epok_auth",
             "from fastapi import FastAPI",
-            "from epok_auth import AuthSettings, EpokAuth",
+            (
+                "from epok_auth import AuthSettings, EpokAuth, Reauthentication, "
+                "ReauthenticationMethod"
+            ),
             "from epok_auth.email_links import AuthEmail, PendingEmailLink",
             (
                 "from epok_auth.fastapi import AuthHttpTransport, ChangePasswordRequest, "
@@ -355,8 +358,10 @@ def _base_check_code() -> str:
             "assert find_spec('google') is None",
             (
                 "assert files('epok_auth.migrations').joinpath('versions', "
-                "'0004_email_links.py').is_file()"
+                "'0006_passkey_reauthentication.py').is_file()"
             ),
+            "assert Reauthentication is not None",
+            "assert ReauthenticationMethod is not None",
             "auth = EpokAuth(settings=AuthSettings.development(), store=MemoryAuthStore())",
             "assert isinstance(auth.http, AuthHttpTransport)",
             (
@@ -403,13 +408,15 @@ def _base_check_code() -> str:
 def _passkey_check_code() -> str:
     return "\n".join(
         (
-            "from epok_auth import PasskeyService",
+            "from epok_auth import PasskeyService, Reauthentication, ReauthenticationMethod",
             "from epok_auth.google.google_auth import GoogleAuthVerifier",
             "from epok_auth.passkeys.webauthn import WebAuthnAdapter",
             "from epok_auth.postgres import PostgresAuthStore",
             "adapter = WebAuthnAdapter(rp_id='localhost', rp_name='EPOK', timeout_ms=60000)",
             "assert adapter.authentication_options(b'a' * 32)['challenge']",
             "assert PasskeyService is not None",
+            "assert Reauthentication is not None",
+            "assert ReauthenticationMethod is not None",
             "assert GoogleAuthVerifier is not None",
             "assert PostgresAuthStore is not None",
         )

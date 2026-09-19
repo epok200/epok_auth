@@ -4,23 +4,24 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-Version `0.6.0` includes browser-bound Magic Links, password recovery, pre-provisioned invitations,
-native SMTP delivery, pending-account activation and an idempotent initial-administrator bootstrap
-through the same account, role and email-link models. See
-[`docs/MAGIC_LINKS_ES.md`](docs/MAGIC_LINKS_ES.md).
+Version `0.7.0` adds password and Passkey reauthentication for a currently authenticated
+`Principal`. Both methods return the same small result without creating tokens, cookies or sessions.
+Products keep ownership of the sensitive action and its single-use confirmation. See
+[`docs/REAUTHENTICATION_ES.md`](docs/REAUTHENTICATION_ES.md).
 
-> **Status:** this source tree defines the `0.6.0` beta. Public APIs may still change before `1.0`.
+> **Status:** this source tree defines the `0.7.0` beta. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
-## Validated beta gate
+## Release gate
 
-The clean beta tree is continuously validated by GitHub Actions. The current release has passed:
+Every release is validated from a clean `main` by GitHub Actions and the local publication
+orchestrator. The required evidence is:
 
 | Gate | Evidence |
 |---|---|
-| Functional and adversarial tests | 403/403 passing, plus passkey, Google and Magic Link browser proofs |
-| Branch coverage | 98.05% |
+| Functional and adversarial tests | Unit, HTTP, PostgreSQL, concurrency and browser proofs |
+| Branch coverage | At least 90% across unit and PostgreSQL paths |
 | Python compatibility | 3.12, 3.13 and 3.14 |
 | PostgreSQL | PostgreSQL 17 migration, zero Alembic drift, integration and concurrency tests |
 | Static quality | Ruff formatting/lint/security rules and Pyright strict on production source |
@@ -30,7 +31,7 @@ The clean beta tree is continuously validated by GitHub Actions. The current rel
 
 The repository does not claim that vulnerabilities are impossible. The green gate establishes reproducible evidence for the defined beta threat model and invariants.
 
-## What 0.5.0 includes
+## What 0.7.0 includes
 
 - Argon2id password hashing through `pwdlib`, with rehash support and dummy verification;
 - local users, active/disabled state, roles, scopes, administrative provisioning and reset;
@@ -43,6 +44,8 @@ The repository does not claim that vulnerabilities are impossible. The green gat
 - account lockout, uniform login failures and security-event persistence;
 - plug-and-play FastAPI routers and dependencies;
 - WebAuthn passkey registration, discoverable login, listing and revocation;
+- password and Passkey reauthentication bound to the active session family;
+- generic reauthentication results without creating or replacing a session;
 - Google Sign-In with linked-only, preauthorized and open account policies;
 - browser-bound Magic Link login, password recovery, pre-provisioned invitations and SMTP delivery;
 - packaged Alembic migrations and an operational CLI;
@@ -244,6 +247,8 @@ replacing its activation link and consuming the first-password transition. It re
 
 `auth.current_user`, `auth.authenticated`, `auth.require_roles()`, `auth.require_scopes()` and
 `auth.require_recent_authentication()` are stable public dependencies for product-owned routers.
+`auth.service.reauthenticate_password()` and `auth.passkey_service` expose the product-owned
+reauthentication boundary without installing a generic confirmation token or action policy.
 
 The existing `auth.install()`, router helpers and exception handlers keep their current behavior.
 
@@ -283,6 +288,7 @@ Vue receives only safe user/session state. Access and refresh credentials remain
 - [Development process and quality gates](DEVELOPMENT.md)
 - [Minimal usage and test guide in Spanish](docs/USAGE_ES.md)
 - [Passkeys integration guide in Spanish](docs/PASSKEYS_ES.md)
+- [Reauthentication integration guide in Spanish](docs/REAUTHENTICATION_ES.md)
 - [Google Sign-In integration guide in Spanish](docs/GOOGLE_ES.md)
 - [Magic Links, recovery and email delivery in Spanish](docs/MAGIC_LINKS_ES.md)
 - [Publishing and versioning](docs/PUBLISHING.md)
@@ -299,6 +305,7 @@ The beta is designed around these invariants:
 - refresh credentials are one-time, opaque and hashed at rest;
 - replay revokes the whole session family;
 - changing a password, disabling or locking a user revokes sessions;
+- reauthentication never creates a session and Passkey challenges are bound to the active family;
 - unsafe production configuration fails before serving traffic;
 - authentication errors do not echo secrets or distinguish unknown users.
 

@@ -140,7 +140,9 @@ def test_artifact_smoke_contract_covers_base_and_optional_installs() -> None:
     compile(passkey_code, "<passkey-smoke>", "exec")
     assert "find_spec('webauthn') is None" in base_code
     assert "find_spec('google') is None" in base_code
-    assert "0004_email_links.py" in base_code
+    assert "0006_passkey_reauthentication.py" in base_code
+    assert "ReauthenticationMethod" in base_code
+    assert "ReauthenticationMethod" in passkey_code
     assert "email_link_dispatcher=EmailQueue()" in base_code
     assert "'/auth/email-links/login'" in base_code
     assert "WebAuthnAdapter" in passkey_code

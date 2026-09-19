@@ -185,9 +185,9 @@ El contenedor PostgreSQL se elimina en un bloque de limpieza aunque una prueba f
 
 ## Serie publicada
 
-La serie `0.2` introdujo passkeys. La serie `0.3` incorpora Google Sign-In con políticas de
-cuenta y aislamiento del historial Alembic. Cada release se valida desde un `main` limpio y con
-CI verde mediante:
+La serie `0.2` introdujo passkeys, `0.3` agregó Google Sign-In, `0.4` agregó Magic Links,
+`0.6` incorporó activación de cuentas y `0.7` incorpora reautenticación sin emitir sesiones.
+Cada release se valida desde un `main` limpio y con CI verde mediante:
 
 ```bash
 uv run scripts/publish.py --validate-only

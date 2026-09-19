@@ -19,7 +19,13 @@ from epok_auth.email_links import (
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.fastapi import EpokAuth
 from epok_auth.google import GoogleAccountMode, GoogleLoginService
-from epok_auth.models import Principal, UserAccount, UserStatus
+from epok_auth.models import (
+    Principal,
+    Reauthentication,
+    ReauthenticationMethod,
+    UserAccount,
+    UserStatus,
+)
 from epok_auth.passkeys import PasskeyCredential, PasskeyOptions, PasskeyService
 
 try:
@@ -49,6 +55,8 @@ __all__ = [
     "PasskeyService",
     "PendingEmailLink",
     "Principal",
+    "Reauthentication",
+    "ReauthenticationMethod",
     "SmtpEmailSender",
     "SmtpSecurity",
     "SmtpSettings",

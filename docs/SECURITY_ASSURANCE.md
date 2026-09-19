@@ -2,9 +2,9 @@
 
 This document maps beta capabilities to executable evidence. It is not a claim that vulnerabilities are impossible.
 
-## 0.4.0 validation snapshot
+## Historical 0.4.0 validation snapshot
 
-The current Magic Link branch was validated locally on 2026-08-24 with:
+The Magic Link branch was validated locally on 2026-08-24 with:
 
 - 374 Python tests, including 25 cases against PostgreSQL 17;
 - 98.40% branch-aware coverage across the complete package;
@@ -46,6 +46,7 @@ product deployment still requires the controls listed at the end of this documen
 | Password hashing | No plaintext password is persisted | `test_passwords.py`, PostgreSQL flow |
 | Unknown-user login | Unknown and wrong-password responses are equivalent | `test_service_sessions.py`, `test_fastapi.py` |
 | Lockout | Threshold locks and revokes existing sessions | service tests |
+| Password reauthentication | The current password is verified under the existing lockout and hash-upgrade policy without creating a session | `tests/test_reauthentication.py` |
 | JWT verification | Algorithm, issuer, audience, type and temporal claims are constrained | `test_tokens.py` |
 | Refresh storage | Only token/CSRF hashes are persisted | model/store tests and DB assertions |
 | Rotation | A refresh credential has one valid use | service and PostgreSQL integration tests |
@@ -59,6 +60,9 @@ product deployment still requires the controls listed at the end of this documen
 | Passkey origin binding | Trusted Origin, RP ID, client origin and cross-origin flags fail closed | service and real adapter adversarial tests |
 | Passkey ownership | Discoverable `userHandle` matches the credential owner | real adapter adversarial tests |
 | Passkey lifecycle | Multiple credentials can be listed and individually revoked | service and HTTP flow tests |
+| Passkey reauthentication | The challenge is bound to user and session family, survives a legitimate refresh and updates the signature counter | `tests/passkeys/test_reauthentication.py`, `tests/test_reauthentication_postgres_integration.py` |
+| Reauthentication replay | A Passkey ceremony has one atomic use and concurrent completion yields one success | `tests/test_reauthentication_postgres_integration.py` |
+| Reauthentication session isolation | Password and Passkey verification return an in-process result without issuing or rotating a session | reauthentication unit and PostgreSQL tests |
 | Browser passkey client | Unit mocks cover binary conversion and headless Chromium completes the real six-route ceremony with a virtual WebAuthn authenticator | `browser.test.mjs`, `browser.e2e.test.mjs` |
 | Google token verification | The official client verifies a generated RS256 token against a live cached certificate endpoint | `tests/google/test_google_auth.py` |
 | Google nonce replay | Origin-bound challenges expire and are consumed before token verification | Google service and HTTP security tests |

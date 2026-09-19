@@ -258,16 +258,21 @@ class PostgresAuthTransaction(PostgresEmailLinkMethods):
         purpose: PasskeyCeremonyPurpose,
         now: datetime,
         user_id: UUID | None,
+        family_id: UUID | None,
     ) -> PasskeyChallenge | None:
         user_condition = passkey_challenge.c.user_id.is_(None)
         if user_id is not None:
             user_condition = passkey_challenge.c.user_id == user_id
+        family_condition = passkey_challenge.c.family_id.is_(None)
+        if family_id is not None:
+            family_condition = passkey_challenge.c.family_id == family_id
         statement = (
             update(passkey_challenge)
             .where(
                 passkey_challenge.c.id == challenge_id,
                 passkey_challenge.c.purpose == purpose.value,
                 user_condition,
+                family_condition,
                 passkey_challenge.c.consumed_at.is_(None),
                 passkey_challenge.c.expires_at > now,
             )

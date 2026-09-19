@@ -9,6 +9,7 @@ type PublicKeyOptions = dict[str, object]
 class PasskeyCeremonyPurpose(StrEnum):
     REGISTRATION = "registration"
     AUTHENTICATION = "authentication"
+    REAUTHENTICATION = "reauthentication"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,7 @@ class PasskeyChallenge:
     created_at: datetime
     expires_at: datetime
     user_id: UUID | None = None
+    family_id: UUID | None = None
     consumed_at: datetime | None = None
 
 

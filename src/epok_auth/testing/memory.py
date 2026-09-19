@@ -364,12 +364,14 @@ class _MemoryTransaction:
         purpose: PasskeyCeremonyPurpose,
         now: datetime,
         user_id: UUID | None,
+        family_id: UUID | None,
     ) -> PasskeyChallenge | None:
         challenge = self.store.passkey_challenges.get(challenge_id)
         if (
             challenge is None
             or challenge.purpose is not purpose
             or challenge.user_id != user_id
+            or challenge.family_id != family_id
             or challenge.consumed_at is not None
             or challenge.expires_at <= now
         ):

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 - 2026-09-19
+
+- add password reauthentication for the current `Principal` without creating a session;
+- add Passkey reauthentication bound to the current user and session family;
+- preserve password lockout, hash upgrades and Passkey signature counters across reauthentication;
+- emit dedicated reauthentication security events instead of login events;
+- expose one immutable result for product-owned sensitive-action confirmations;
+- add reversible PostgreSQL persistence for family-bound Passkey challenges;
+- verify replay, family substitution, refresh continuity and real WebAuthn concurrency.
+
 ## 0.6.0 - 2026-08-31
 
 - add pending accounts that cannot use password, refresh, Google or Passkeys before activation;

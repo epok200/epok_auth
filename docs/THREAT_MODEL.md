@@ -7,6 +7,7 @@
 - Google external identity links and nonce challenges;
 - email-link hashes, browser nonces and short-lived delivery payloads;
 - active browser sessions;
+- reauthentication challenges and product-issued sensitive-action confirmations;
 - access and refresh credentials;
 - user and role state;
 - security-event integrity;
@@ -29,6 +30,7 @@
 - remote unauthenticated attacker;
 - attacker with a stolen password;
 - attacker with a stolen refresh credential;
+- attacker with a stolen but otherwise valid active session;
 - attacker replaying an already rotated credential;
 - attacker replaying or substituting a WebAuthn ceremony response;
 - attacker presenting a passkey response from another Origin or RP ID;
@@ -48,6 +50,9 @@
 | Password database disclosure | Argon2id hashes; no plaintext credentials |
 | User enumeration | Uniform login response and dummy verification |
 | Brute force | Per-account lockout plus consumer edge-rate-limit hooks |
+| Password reauthentication bypass | Active authoritative session plus the existing password, lockout and hash-upgrade policy |
+| Passkey reauthentication substitution | Challenge bound to the active user, session family, Origin and RP ID |
+| Reauthentication replay | Passkey challenge is consumed once; the product owns a separate intent-specific atomic confirmation |
 | Refresh theft | Opaque high-entropy value; hash only at rest; rotation |
 | Refresh replay | Family relation and fail-closed family revocation |
 | Access theft after logout | Authoritative session lookup on protected requests |
@@ -86,10 +91,10 @@
 | Initial-admin race | One invariant lock serializes lookup, creation and activation-link issuance |
 | Library-admin escalation | Generic pending-account provisioning rejects the configured administrative role |
 
-## Explicit non-goals in 0.4.0
+## Explicit non-goals in 0.7.0
 
 - attestation trust decisions about authenticator manufacturers;
-- passkeys as an automatic MFA or step-up policy;
+- a generic step-up token or automatic policy for product actions;
 - centralized SSO or identity-provider behavior;
 - generic OIDC providers or access to Google APIs;
 - service-to-service authentication;
@@ -104,6 +109,12 @@
 - HS256 requires protecting one symmetric signing secret; asymmetric signing is roadmap work.
 - BFF architecture reduces token exposure but does not make XSS harmless; CSP and frontend hygiene remain required.
 - Public passkey option endpoints still need edge rate limiting against resource exhaustion.
+- A stolen active session can request reauthentication. Sensitive actions still require the
+  independent password or passkey proof, a short-lived product confirmation and normal authorization.
+- `Reauthentication` is an in-process result, not a bearer credential. A product that serializes it
+  or issues a reusable confirmation can widen the impact of theft or replay.
+- The consuming product must bind its confirmation to user, session family, purpose, resource,
+  destination and current revision, then consume it atomically with the sensitive mutation.
 - Public Google option and verification endpoints still need edge rate limiting.
 - Public email-link request endpoints need edge and IP-based rate limiting in addition to the
   persistent per-account limit.

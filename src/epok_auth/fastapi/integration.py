@@ -97,6 +97,10 @@ class EpokAuth:
             )
         return self._account_activation
 
+    @property
+    def passkey_service(self) -> PasskeyService:
+        return self._passkey_service()
+
     @classmethod
     def postgres(
         cls,
@@ -210,7 +214,7 @@ class EpokAuth:
 
     def passkey_router(self, *, prefix: str = "/auth/passkeys") -> APIRouter:
         return create_passkey_router(
-            service=self._passkey_service(),
+            service=self.passkey_service,
             principal_dependency=self.authenticated,
             set_session_cookies=self._http.set_session_cookies,
             request_context=self._http.request_context,

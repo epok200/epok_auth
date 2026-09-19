@@ -32,9 +32,12 @@ Redis coordination or rate limiting.
 
 Additional OIDC providers and provider interfaces based on standard OIDC clients.
 
-## 0.7 - MFA and step-up
+## 0.7 - Reauthentication foundation
 
-TOTP, recovery codes, factor administration, recent-authentication policies and step-up requirements for sensitive operations.
+Password and Passkey reauthentication for the active Principal, without issuing another session.
+The consuming product owns the sensitive action, authorization and single-use confirmation.
+
+TOTP, recovery codes, factor administration and configurable MFA policies remain future work.
 
 ## 0.8 - Distributed verification
 

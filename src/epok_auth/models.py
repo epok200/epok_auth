@@ -40,6 +40,8 @@ class SecurityEventType(StrEnum):
     PASSKEY_LOGIN_SUCCEEDED = "passkey.login_succeeded"
     PASSKEY_LOGIN_FAILED = "passkey.login_failed"
     PASSKEY_REVOKED = "passkey.revoked"
+    REAUTHENTICATION_SUCCEEDED = "reauthentication.succeeded"
+    REAUTHENTICATION_FAILED = "reauthentication.failed"
     GOOGLE_ACCOUNT_CREATED = "google.account_created"
     GOOGLE_IDENTITY_LINKED = "google.identity_linked"
     GOOGLE_LINK_FAILED = "google.link_failed"
@@ -151,6 +153,20 @@ class Principal:
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes
+
+
+class ReauthenticationMethod(StrEnum):
+    PASSWORD = "password"
+    PASSKEY = "passkey"
+
+
+@dataclass(frozen=True, slots=True)
+class Reauthentication:
+    user_id: UUID
+    session_id: UUID
+    family_id: UUID
+    method: ReauthenticationMethod
+    verified_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

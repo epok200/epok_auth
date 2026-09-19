@@ -1,14 +1,18 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie de `0.4.0`, incluidos passkeys, Google Sign-In y Magic Links. Aquí
-encontrarás lo mínimo necesario para levantar PostgreSQL, crear el primer administrador, iniciar
-FastAPI y probar cada operación disponible.
+Esta guía documenta la superficie de `0.7.0`, incluidos reautenticación, passkeys, Google Sign-In
+y Magic Links. Aquí encontrarás lo mínimo necesario para levantar PostgreSQL, crear el primer
+administrador, iniciar FastAPI y probar cada operación disponible.
 
 La ruta recomendada para la primera prueba es usar `AuthSettings`, `EpokAuth.postgres()` y `auth.install()`. Los helpers internos y las clases de persistencia no son necesarios para validar la beta.
 
 Para registrar e iniciar sesión con passkeys, sigue la guía dedicada en
 [`PASSKEYS_ES.md`](PASSKEYS_ES.md). Incluye instalación, configuración, API y un cliente
 de navegador listo para reutilizar.
+
+Para verificar otra vez una sesión antes de una acción sensible, sigue
+[`REAUTHENTICATION_ES.md`](REAUTHENTICATION_ES.md). La guía separa la prueba de identidad que
+pertenece a la librería de la confirmación específica que debe persistir cada producto.
 
 Para Google Sign-In, políticas de vinculación y recuperación, sigue
 [`GOOGLE_ES.md`](GOOGLE_ES.md).
