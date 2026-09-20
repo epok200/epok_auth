@@ -4,12 +4,12 @@
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
 
-Version `0.7.0` adds password and Passkey reauthentication for a currently authenticated
-`Principal`. Both methods return the same small result without creating tokens, cookies or sessions.
-Products keep ownership of the sensitive action and its single-use confirmation. See
+Version `0.7.1` keeps product-owned password rules on every human-selected password while allowing
+the library to hash its own high-entropy temporary and unusable secrets. The `0.7` series also adds
+password and Passkey reauthentication for a currently authenticated `Principal`. See
 [`docs/REAUTHENTICATION_ES.md`](docs/REAUTHENTICATION_ES.md).
 
-> **Status:** this source tree defines the `0.7.0` beta. Public APIs may still change before `1.0`.
+> **Status:** this source tree defines the `0.7.1` beta. Public APIs may still change before `1.0`.
 >
 > **Practical testing:** see the Spanish step-by-step guide in [`docs/USAGE_ES.md`](docs/USAGE_ES.md).
 
@@ -31,7 +31,7 @@ orchestrator. The required evidence is:
 
 The repository does not claim that vulnerabilities are impossible. The green gate establishes reproducible evidence for the defined beta threat model and invariants.
 
-## What 0.7.0 includes
+## What 0.7 includes
 
 - Argon2id password hashing through `pwdlib`, with rehash support and dummy verification;
 - local users, active/disabled state, roles, scopes, administrative provisioning and reset;

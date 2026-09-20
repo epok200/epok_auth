@@ -199,7 +199,10 @@ class AccountActivationService:
     ) -> UserAccount:
         normalized_scopes = normalize_capabilities(scopes, maximum=self.settings.max_scopes)
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
-        password_hash = await asyncio.to_thread(self.passwords.hash, unusable_password)
+        password_hash = await asyncio.to_thread(
+            self.passwords.hash_generated_secret,
+            unusable_password,
+        )
         return UserAccount(
             id=uuid4(),
             email=normalize_email(email),

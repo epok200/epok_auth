@@ -5,6 +5,7 @@ import pytest
 
 from epok_auth.errors import AuthError, AuthErrorCode
 from epok_auth.models import RequestContext, SecurityEventType, UserStatus, UserUpdate
+from epok_auth.passwords import PasswordManager
 from epok_auth.service import (
     AuthService,
     normalize_capabilities,
@@ -14,6 +15,11 @@ from epok_auth.service import (
 )
 from epok_auth.testing import MemoryAuthStore
 from tests.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, USER_EMAIL
+
+
+class _RejectAllPasswords:
+    def validate(self, password: str) -> None:
+        raise AuthError(AuthErrorCode.PASSWORD_INVALID, "Rejected by product policy.")
 
 
 @pytest.mark.asyncio
@@ -100,6 +106,30 @@ async def test_administrator_can_provision_user_with_one_time_password(
     with pytest.raises(AuthError) as captured:
         await service.create_user(email=USER_EMAIL, display_name="Duplicate")
     assert captured.value.code is AuthErrorCode.USER_EXISTS
+
+
+@pytest.mark.asyncio
+async def test_generated_temporary_password_bypasses_product_policy(
+    store: MemoryAuthStore,
+    settings,
+    clock,
+) -> None:
+    passwords = PasswordManager.recommended(additional_rules=(_RejectAllPasswords(),))
+    service = AuthService(
+        store=store,
+        settings=settings,
+        passwords=passwords,
+        clock=clock,
+    )
+
+    provisioned = await service.create_user(
+        email=USER_EMAIL,
+        display_name="Laboratory Analyst",
+    )
+
+    assert (
+        await service.login(USER_EMAIL, provisioned.temporary_password)
+    ).principal.user_id == provisioned.user.id
 
 
 @pytest.mark.asyncio

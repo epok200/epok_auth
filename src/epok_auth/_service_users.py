@@ -90,7 +90,10 @@ class UserServiceMethods(AuthServiceBase):
         )
         normalized_scopes = normalize_capabilities(scopes, maximum=self.settings.max_scopes)
         temporary_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
-        password_hash = await asyncio.to_thread(self.passwords.hash, temporary_password)
+        password_hash = await asyncio.to_thread(
+            self.passwords.hash_generated_secret,
+            temporary_password,
+        )
         user = UserAccount(
             id=uuid4(),
             email=normalize_email(email),
@@ -245,7 +248,10 @@ class UserServiceMethods(AuthServiceBase):
     ) -> ProvisionedUser:
         now = clock_now(self.clock)
         temporary_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
-        password_hash = await asyncio.to_thread(self.passwords.hash, temporary_password)
+        password_hash = await asyncio.to_thread(
+            self.passwords.hash_generated_secret,
+            temporary_password,
+        )
         async with self.store.transaction() as transaction:
             current = await transaction.get_user_by_id(user_id, for_update=True)
             if current is None:
