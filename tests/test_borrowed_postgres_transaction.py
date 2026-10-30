@@ -21,6 +21,7 @@ async def test_postgres_borrowed_transaction_leaves_commit_and_rollback_to_calle
     service = AuthService(store=store, settings=settings)
     created = await service.create_user(email="outer@example.com", display_name="Outer")
     bundle = await service.login(created.user.email, created.temporary_password)
+    before = await service.get_user(created.user.id)
     event_count = select(func.count()).select_from(security_event).where(
         security_event.c.user_id == created.user.id,
         security_event.c.event_type == SecurityEventType.USER_DISABLED.value,
@@ -35,7 +36,7 @@ async def test_postgres_borrowed_transaction_leaves_commit_and_rollback_to_calle
                 )
             assert connection.in_transaction()
             await outer.rollback()
-    assert await service.get_user(created.user.id) == created.user
+    assert await service.get_user(created.user.id) == before
     assert (await service.authenticate(bundle.access_token)).user_id == created.user.id
     async with store.transaction() as transaction:
         session = await transaction.get_session_by_id(bundle.principal.session_id)
@@ -47,7 +48,9 @@ async def test_postgres_borrowed_transaction_leaves_commit_and_rollback_to_calle
             await service.update_user(
                 created.user.id, UserUpdate(status=UserStatus.DISABLED), transaction=transaction
             )
-    assert (await service.get_user(created.user.id)).status is UserStatus.DISABLED
+    disabled = await service.get_user(created.user.id)
+    assert disabled.status is UserStatus.DISABLED
+    assert disabled.security_version == before.security_version + 1
     with pytest.raises(AuthError) as invalid_token:
         await service.authenticate(bundle.access_token)
     assert invalid_token.value.code is AuthErrorCode.INVALID_TOKEN
