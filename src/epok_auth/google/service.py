@@ -132,7 +132,10 @@ class GoogleLoginService:
     ) -> ProvisionedUser:
         now = clock_now(self.clock)
         temporary_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
-        password_hash = await asyncio.to_thread(self.passwords.hash, temporary_password)
+        password_hash = await asyncio.to_thread(
+            self.passwords.hash_generated_secret,
+            temporary_password,
+        )
         async with self.store.transaction() as transaction:
             identity = await transaction.get_external_identity_for_user(
                 user_id,
@@ -325,7 +328,10 @@ class GoogleLoginService:
         context: RequestContext,
     ) -> SessionBundle:
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
-        password_hash = await asyncio.to_thread(self.passwords.hash, unusable_password)
+        password_hash = await asyncio.to_thread(
+            self.passwords.hash_generated_secret,
+            unusable_password,
+        )
         linked_user = user.disable_password(password_hash, now)
         await transaction.update_user(linked_user)
         return await self._insert_identity_and_login(
@@ -347,7 +353,10 @@ class GoogleLoginService:
         if email is None:
             raise invalid_google_credentials()
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
-        password_hash = await asyncio.to_thread(self.passwords.hash, unusable_password)
+        password_hash = await asyncio.to_thread(
+            self.passwords.hash_generated_secret,
+            unusable_password,
+        )
         user = UserAccount(
             id=uuid4(),
             email=email,

@@ -56,6 +56,26 @@ class FakeHash:
         return valid, "encoded:updated" if valid else None
 
 
+class RejectAllPasswords:
+    def validate(self, password: str) -> None:
+        raise AuthError(AuthErrorCode.PASSWORD_INVALID, "Rejected by product policy.")
+
+
+def test_generated_secret_bypasses_human_password_policy() -> None:
+    fake = FakeHash()
+    manager = PasswordManager(
+        rules=(RejectAllPasswords(),),
+        password_hash=fake,
+    )
+
+    with pytest.raises(AuthError):
+        manager.hash("human-selected-password")
+
+    encoded = manager.hash_generated_secret("high-entropy-generated-secret")
+
+    assert encoded == "encoded:high-entropy-generated-secret"
+
+
 def test_verify_and_update_is_exposed_only_for_valid_passwords() -> None:
     fake = FakeHash()
     manager = PasswordManager.recommended(password_hash=fake)

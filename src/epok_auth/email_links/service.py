@@ -269,7 +269,10 @@ class EmailLinkService:
         if not await self._active_link_exists(token, EmailLinkPurpose.INVITATION, now):
             raise invalid_email_link()
         unusable_password = secrets.token_urlsafe(self.settings.temporary_password_bytes)
-        password_hash = await asyncio.to_thread(self.passwords.hash, unusable_password)
+        password_hash = await asyncio.to_thread(
+            self.passwords.hash_generated_secret,
+            unusable_password,
+        )
         result: UserAccount | None = None
         async with self.store.transaction() as transaction:
             link, user = await self._consumable(

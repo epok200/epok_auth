@@ -1,6 +1,6 @@
 # Reautenticación para acciones sensibles
 
-`epok-auth 0.7.0` permite volver a verificar al usuario de una sesión activa mediante contraseña o
+`epok-auth 0.7.1` permite volver a verificar al usuario de una sesión activa mediante contraseña o
 passkey. El resultado confirma identidad y sesión, pero no es un token, no crea otra sesión y no
 decide qué acción del producto queda autorizada.
 
@@ -19,13 +19,13 @@ Esta separación evita que una prueba genérica autorice más acciones de las ne
 Para contraseña y PostgreSQL:
 
 ```bash
-uv add "epok-auth[postgres]==0.7.0"
+uv add "epok-auth[postgres]==0.7.1"
 ```
 
 Para passkeys:
 
 ```bash
-uv add "epok-auth[postgres,passkeys]==0.7.0"
+uv add "epok-auth[postgres,passkeys]==0.7.1"
 ```
 
 Aplica la migración antes de servir la nueva versión:

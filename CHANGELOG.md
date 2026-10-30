@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 - 2026-09-19
+
+- preserve product-owned password rules for every human-selected password;
+- hash high-entropy temporary and unusable secrets without applying human composition rules;
+- keep provisioning, activation, recovery and Google-only accounts compatible with custom policies.
+
 ## 0.7.0 - 2026-09-19
 
 - add password reauthentication for the current `Principal` without creating a session;

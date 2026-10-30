@@ -1,6 +1,6 @@
 # Guía mínima de uso y prueba
 
-Esta guía documenta la superficie de `0.7.0`, incluidos reautenticación, passkeys, Google Sign-In
+Esta guía documenta la superficie de `0.7.1`, incluidos reautenticación, passkeys, Google Sign-In
 y Magic Links. Aquí encontrarás lo mínimo necesario para levantar PostgreSQL, crear el primer
 administrador, iniciar FastAPI y probar cada operación disponible.
 
