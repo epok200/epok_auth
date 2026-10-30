@@ -16,7 +16,7 @@ from epok_auth.models import (
     UserStatus,
     UserUpdate,
 )
-from epok_auth.store import StoreConflictError
+from epok_auth.store import AuthTransaction, StoreConflictError
 from epok_auth.tokens import clock_now
 
 
@@ -141,101 +141,114 @@ class UserServiceMethods(AuthServiceBase):
         update: UserUpdate,
         *,
         context: RequestContext = EMPTY_CONTEXT,
+        transaction: AuthTransaction | None = None,
+    ) -> UserAccount:
+        if transaction is not None:
+            return await self._update_user(transaction, user_id, update, context)
+        async with self.store.transaction() as owned:
+            return await self._update_user(owned, user_id, update, context)
+
+    async def _update_user(
+        self,
+        transaction: AuthTransaction,
+        user_id: UUID,
+        update: UserUpdate,
+        context: RequestContext,
     ) -> UserAccount:
         now = clock_now(self.clock)
-        async with self.store.transaction() as transaction:
-            await transaction.acquire_admin_invariant_lock()
-            current = await transaction.get_user_by_id(user_id, for_update=True)
-            if current is None:
-                raise AuthError(AuthErrorCode.USER_NOT_FOUND, "User not found.", status_code=404)
-            roles = (
-                normalize_capabilities(update.roles, maximum=self.settings.max_roles)
-                if update.roles is not None
-                else current.roles
+        await transaction.acquire_admin_invariant_lock()
+        current = await transaction.get_user_by_id(user_id, for_update=True)
+        if current is None:
+            raise AuthError(AuthErrorCode.USER_NOT_FOUND, "User not found.", status_code=404)
+        roles = (
+            normalize_capabilities(update.roles, maximum=self.settings.max_roles)
+            if update.roles is not None
+            else current.roles
+        )
+        scopes = (
+            normalize_capabilities(update.scopes, maximum=self.settings.max_scopes)
+            if update.scopes is not None
+            else current.scopes
+        )
+        status = update.status or current.status
+        if update.status is UserStatus.PENDING_ACTIVATION or (
+            current.status is UserStatus.PENDING_ACTIVATION
+            and update.status not in (None, UserStatus.DISABLED)
+        ):
+            raise AuthError(
+                AuthErrorCode.FORBIDDEN,
+                "Pending account activation cannot be changed through user updates.",
             )
-            scopes = (
-                normalize_capabilities(update.scopes, maximum=self.settings.max_scopes)
-                if update.scopes is not None
-                else current.scopes
+        display_name = (
+            normalize_display_name(update.display_name)
+            if update.display_name is not None
+            else current.display_name
+        )
+        google_auto_link_allowed = (
+            update.google_auto_link_allowed
+            if update.google_auto_link_allowed is not None
+            else current.google_auto_link_allowed
+        )
+        email_link_login_enabled = (
+            update.email_link_login_enabled
+            if update.email_link_login_enabled is not None
+            else current.email_link_login_enabled
+        )
+        loses_active_admin = (
+            current.status is UserStatus.ACTIVE
+            and self.settings.admin_role in current.roles
+            and (status is not UserStatus.ACTIVE or self.settings.admin_role not in roles)
+        )
+        if (
+            loses_active_admin
+            and await transaction.count_users_with_role(
+                self.settings.admin_role,
+                active_only=True,
             )
-            status = update.status or current.status
-            if update.status is UserStatus.PENDING_ACTIVATION or (
-                current.status is UserStatus.PENDING_ACTIVATION and update.status is not None
-            ):
-                raise AuthError(
-                    AuthErrorCode.FORBIDDEN,
-                    "Pending account activation cannot be changed through user updates.",
-                )
-            display_name = (
-                normalize_display_name(update.display_name)
-                if update.display_name is not None
-                else current.display_name
+            <= 1
+        ):
+            raise AuthError(
+                AuthErrorCode.LAST_ADMIN_REQUIRED,
+                "At least one active administrator is required.",
+                status_code=409,
             )
-            google_auto_link_allowed = (
-                update.google_auto_link_allowed
-                if update.google_auto_link_allowed is not None
-                else current.google_auto_link_allowed
+        security_changed = (
+            status is not current.status
+            or roles != current.roles
+            or scopes != current.scopes
+            or google_auto_link_allowed != current.google_auto_link_allowed
+            or email_link_login_enabled != current.email_link_login_enabled
+        )
+        updated = replace(
+            current,
+            display_name=display_name,
+            status=status,
+            roles=roles,
+            scopes=scopes,
+            google_auto_link_allowed=google_auto_link_allowed,
+            email_link_login_enabled=email_link_login_enabled,
+            updated_at=now,
+        )
+        if security_changed:
+            updated = updated.advance_security_version(now)
+        await transaction.update_user(updated)
+        event_type = SecurityEventType.USER_UPDATED
+        if current.status is not status:
+            event_type = (
+                SecurityEventType.USER_DISABLED
+                if status is UserStatus.DISABLED
+                else SecurityEventType.USER_ENABLED
             )
-            email_link_login_enabled = (
-                update.email_link_login_enabled
-                if update.email_link_login_enabled is not None
-                else current.email_link_login_enabled
-            )
-            loses_active_admin = (
-                current.status is UserStatus.ACTIVE
-                and self.settings.admin_role in current.roles
-                and (status is not UserStatus.ACTIVE or self.settings.admin_role not in roles)
-            )
-            if (
-                loses_active_admin
-                and await transaction.count_users_with_role(
-                    self.settings.admin_role,
-                    active_only=True,
-                )
-                <= 1
-            ):
-                raise AuthError(
-                    AuthErrorCode.LAST_ADMIN_REQUIRED,
-                    "At least one active administrator is required.",
-                    status_code=409,
-                )
-            security_changed = (
-                status is not current.status
-                or roles != current.roles
-                or scopes != current.scopes
-                or google_auto_link_allowed != current.google_auto_link_allowed
-                or email_link_login_enabled != current.email_link_login_enabled
-            )
-            updated = replace(
-                current,
-                display_name=display_name,
-                status=status,
-                roles=roles,
-                scopes=scopes,
-                google_auto_link_allowed=google_auto_link_allowed,
-                email_link_login_enabled=email_link_login_enabled,
-                updated_at=now,
-            )
-            if security_changed:
-                updated = updated.advance_security_version(now)
-            await transaction.update_user(updated)
-            event_type = SecurityEventType.USER_UPDATED
-            if current.status is not status:
-                event_type = (
-                    SecurityEventType.USER_DISABLED
-                    if status is UserStatus.DISABLED
-                    else SecurityEventType.USER_ENABLED
-                )
-            if status is UserStatus.DISABLED:
-                await transaction.revoke_user_sessions(user_id, revoked_at=now)
-            await record_security_event(
-                transaction,
-                event_type,
-                now=now,
-                user_id=user_id,
-                context=context,
-            )
-            return updated
+        if status is UserStatus.DISABLED:
+            await transaction.revoke_user_sessions(user_id, revoked_at=now)
+        await record_security_event(
+            transaction,
+            event_type,
+            now=now,
+            user_id=user_id,
+            context=context,
+        )
+        return updated
 
     async def reset_password(
         self,

@@ -161,12 +161,17 @@ async def test_user_updates_cannot_bypass_pending_activation(
         )
     assert pending_bypass.value.code is AuthErrorCode.FORBIDDEN
 
-    with pytest.raises(AuthError) as disabled_bypass:
-        await harness.auth.update_user(
-            activation.user.id,
-            UserUpdate(status=UserStatus.DISABLED),
-        )
-    assert disabled_bypass.value.code is AuthErrorCode.FORBIDDEN
+    assert await harness.mailer.deliver(activation.pending) is True
+    disabled = await harness.auth.update_user(
+        activation.user.id,
+        UserUpdate(status=UserStatus.DISABLED),
+    )
+    assert disabled.id == activation.user.id
+    assert disabled.status is UserStatus.DISABLED
+    assert disabled.security_version == activation.user.security_version + 1
+    with pytest.raises(AuthError) as revoked_activation:
+        await harness.activation.activate(token_from(activation.pending.email), NEW_PASSWORD)
+    assert revoked_activation.value.code is AuthErrorCode.EMAIL_LINK_INVALID
 
 
 @pytest.mark.security
