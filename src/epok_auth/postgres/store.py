@@ -91,8 +91,8 @@ class PostgresAuthStore:
                 )
             yield PostgresAuthTransaction(connection)
             return
-        async with self.engine.begin() as connection:
-            yield PostgresAuthTransaction(connection)
+        async with self.engine.begin() as owned_connection:
+            yield PostgresAuthTransaction(owned_connection)
 
     async def aclose(self) -> None:
         await self.engine.dispose()

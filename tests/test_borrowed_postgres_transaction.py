@@ -7,12 +7,13 @@ from epok_auth.models import SecurityEventType, UserStatus, UserUpdate
 from epok_auth.postgres import PostgresAuthStore
 from epok_auth.postgres.tables import security_event
 from epok_auth.service import AuthService
-from tests.test_postgres_integration import database_url as database_url
-from tests.test_postgres_integration import reset_database as reset_database
-from tests.test_postgres_integration import settings as settings
-from tests.test_postgres_integration import store as store
+from tests import test_postgres_integration as postgres_fixtures
 
 pytestmark = pytest.mark.integration
+database_url = postgres_fixtures.database_url
+reset_database = postgres_fixtures.reset_database
+settings = postgres_fixtures.settings
+store = postgres_fixtures.store
 
 
 async def test_postgres_borrowed_transaction_leaves_commit_and_rollback_to_caller(
@@ -30,16 +31,15 @@ async def test_postgres_borrowed_transaction_leaves_commit_and_rollback_to_calle
             security_event.c.event_type == SecurityEventType.USER_DISABLED.value,
         )
     )
-    async with store.engine.connect() as connection:
-        async with connection.begin() as outer:
-            async with store.transaction(connection=connection) as transaction:
-                await service.update_user(
-                    created.user.id,
-                    UserUpdate(status=UserStatus.DISABLED),
-                    transaction=transaction,
-                )
-            assert connection.in_transaction()
-            await outer.rollback()
+    async with store.engine.connect() as connection, connection.begin() as outer:
+        async with store.transaction(connection=connection) as transaction:
+            await service.update_user(
+                created.user.id,
+                UserUpdate(status=UserStatus.DISABLED),
+                transaction=transaction,
+            )
+        assert connection.in_transaction()
+        await outer.rollback()
     assert await service.get_user(created.user.id) == before
     assert (await service.authenticate(bundle.access_token)).user_id == created.user.id
     async with store.transaction() as transaction:
@@ -47,11 +47,13 @@ async def test_postgres_borrowed_transaction_leaves_commit_and_rollback_to_calle
         assert session is not None and session.revoked_at is None
     async with store.engine.connect() as connection:
         assert await connection.scalar(event_count) == 0
-    async with store.engine.begin() as connection:
-        async with store.transaction(connection=connection) as transaction:
-            await service.update_user(
-                created.user.id, UserUpdate(status=UserStatus.DISABLED), transaction=transaction
-            )
+    async with (
+        store.engine.begin() as connection,
+        store.transaction(connection=connection) as transaction,
+    ):
+        await service.update_user(
+            created.user.id, UserUpdate(status=UserStatus.DISABLED), transaction=transaction
+        )
     disabled = await service.get_user(created.user.id)
     assert disabled.status is UserStatus.DISABLED
     assert disabled.security_version == before.security_version + 1
