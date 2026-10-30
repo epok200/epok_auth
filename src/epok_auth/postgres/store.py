@@ -8,6 +8,7 @@ from sqlalchemy import and_, delete, func, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+from epok_auth.errores import AuthError, AuthErrorCode
 from epok_auth.google.models import (
     ExternalIdentity,
     GoogleChallenge,
@@ -77,7 +78,19 @@ class PostgresAuthStore:
         return cls(engine)
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncGenerator[GoogleTransaction, None]:
+    async def transaction(
+        self, *, connection: AsyncConnection | None = None
+    ) -> AsyncGenerator[GoogleTransaction, None]:
+        """A borrowed connection stays under the caller's commit and rollback ownership."""
+        if connection is not None:
+            if connection.engine is not self.engine or not connection.in_transaction():
+                raise AuthError(
+                    AuthErrorCode.CONFIG_INVALID,
+                    "A borrowed connection requires this store's engine and an active transaction.",
+                    status_code=500,
+                )
+            yield PostgresAuthTransaction(connection)
+            return
         async with self.engine.begin() as connection:
             yield PostgresAuthTransaction(connection)
 

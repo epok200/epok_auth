@@ -1,5 +1,11 @@
 # epok-auth
 
+Consumer transactions can call `service.update_user(..., transaction=transaction)`.
+For PostgreSQL, obtain that transaction with `store.transaction(connection=connection)`
+inside a transaction on the same engine. The caller owns commit and rollback, and must
+roll back the entire transaction if an operation fails. Disabling a pending account preserves
+its identity and invalidates old activation links through its security version.
+
 **FastAPI-first authentication with PostgreSQL-authoritative, revocable sessions.**
 
 `epok-auth` is designed for private B2B web applications that need secure local accounts without rebuilding password handling, session rotation, revocation, CSRF protection, administration, and FastAPI dependencies for every product.
