@@ -22,9 +22,13 @@ async def test_postgres_borrowed_transaction_leaves_commit_and_rollback_to_calle
     created = await service.create_user(email="outer@example.com", display_name="Outer")
     bundle = await service.login(created.user.email, created.temporary_password)
     before = await service.get_user(created.user.id)
-    event_count = select(func.count()).select_from(security_event).where(
-        security_event.c.user_id == created.user.id,
-        security_event.c.event_type == SecurityEventType.USER_DISABLED.value,
+    event_count = (
+        select(func.count())
+        .select_from(security_event)
+        .where(
+            security_event.c.user_id == created.user.id,
+            security_event.c.event_type == SecurityEventType.USER_DISABLED.value,
+        )
     )
     async with store.engine.connect() as connection:
         async with connection.begin() as outer:
